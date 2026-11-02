@@ -1,0 +1,7 @@
+# 비밀 키는 절대 커밋하지 않습니다 — Netlify 환경변수에만 넣으세요
+.env
+.env.*
+node_modules/
+.netlify/
+.vscode/
+__pycache__/

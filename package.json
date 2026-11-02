@@ -1,7 +1,11 @@
 {
   "name": "stock-tracker",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "private": true,
+  "description": "아이씨에이치(368600) 기업 노트 — KIS 시세 + 네이버 뉴스 + 누적 기록",
+  "engines": { "node": ">=18" },
   "dependencies": {
+    "@netlify/blobs": "^8.1.0",
     "node-fetch": "^2.7.0"
   }
 }
