@@ -296,7 +296,8 @@
   /* ---------- KIS 시세 ---------- */
   async function loadPrice() {
     try {
-      const r = await fetch("/.netlify/functions/stock?type=price", { cache: "no-store" }); const j = await r.json();
+      const r = await fetch("/.netlify/functions/stock?type=price", { cache: "no-store" });
+      const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status} — 함수 응답이 JSON이 아님 (함수 미배포 가능)` }));
       if (!j.ok) throw new Error(j.error);
       const d = j.data;
       LIVE = { price: d.price, shares: d.shares || LIVE.shares, ok: true };
@@ -312,7 +313,7 @@
     } catch (e) {
       $("#liveLabel").textContent = "오프라인 — 참고가 사용 (" + D.META.refPriceNote + ")";
       $("#qPrice").textContent = fmt(LIVE.price) + "원";
-      $("#qChg").innerHTML = `<span class="muted small">시세 API 미연결</span>`;
+      $("#qChg").innerHTML = `<span class="small" style="color:#c0392b">시세 연결 실패: ${esc(String(e.message || e)).slice(0, 160)}</span>`;
       const cap = (LIVE.price * LIVE.shares) / 1e8;
       $("#qCap").textContent = fmt(cap) + "억"; $("#qPbr").textContent = fmt(cap / D.META.equity, 2) + "배"; $("#qSh").textContent = fmt(LIVE.shares) + " (추정)";
       $("#tCap").textContent = fmt(cap) + "억"; $("#tCapS").textContent = "참고가 기준 · 추정";
