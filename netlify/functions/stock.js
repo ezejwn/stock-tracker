@@ -23,28 +23,47 @@ function tokenStore(event) {
   }
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const fresh = (c) => c && c.token && c.exp - Date.now() > 5 * 60e3;
+
+// 동시에 여러 요청이 와도 토큰은 한 번만 발급 (KIS: 발급 1분 1회 제한)
 async function getToken(event) {
-  const now = Date.now();
-  if (mem.token && mem.exp - now > 5 * 60e3) return mem.token;
+  if (fresh(mem)) return mem.token;
   const store = tokenStore(event);
+  const read = async () => { try { return store ? await store.get("token", { type: "json" }) : null; } catch (e) { return null; } };
+
+  let c = await read();
+  if (fresh(c)) { mem = c; return c.token; }
+
+  // 다른 요청이 발급 중이면(잠금 20초) 그 결과를 기다림
   if (store) {
-    try {
-      const c = await store.get("token", { type: "json" });
-      if (c && c.token && c.exp - now > 5 * 60e3) { mem = c; return c.token; }
-    } catch (e) {}
+    let lock = null;
+    try { lock = await store.get("lock", { type: "json" }); } catch (e) {}
+    if (lock && Date.now() - lock.at < 20e3) {
+      for (let i = 0; i < 12; i++) { await sleep(500); c = await read(); if (fresh(c)) { mem = c; return c.token; } }
+    }
+    try { await store.setJSON("lock", { at: Date.now() }); } catch (e) {}
   }
-  const r = await doFetch(`${BASE}/oauth2/tokenP`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ grant_type: "client_credentials", appkey: KEY, appsecret: SECRET }),
-  });
-  const j = await r.json();
+
+  const issue = async () => {
+    const r = await doFetch(`${BASE}/oauth2/tokenP`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ grant_type: "client_credentials", appkey: KEY, appsecret: SECRET }),
+    });
+    return r.json();
+  };
+  let j = await issue();
   if (!j.access_token) {
     const msg = j.error_description || j.msg1 || JSON.stringify(j);
-    throw new Error("토큰 발급 실패: " + msg + (/1분/.test(msg) ? " (1분 뒤 다시 시도)" : ""));
+    // 1분 제한에 걸렸으면 다른 요청이 저장한 토큰이 있는지 잠시 확인
+    if (/EGW00133|1분/.test(msg + (j.error_code || ""))) {
+      for (let i = 0; i < 10; i++) { await sleep(600); c = await read(); if (fresh(c)) { mem = c; return c.token; } }
+    }
+    throw new Error("토큰 발급 실패: " + msg + (/1분|EGW00133/.test(msg + (j.error_code || "")) ? " (1분 뒤 새로고침)" : ""));
   }
-  mem = { token: j.access_token, exp: now + (Number(j.expires_in) || 86400) * 1000 };
-  if (store) { try { await store.setJSON("token", mem); } catch (e) {} }
+  mem = { token: j.access_token, exp: Date.now() + (Number(j.expires_in) || 86400) * 1000 };
+  if (store) { try { await store.setJSON("token", mem); await store.delete("lock"); } catch (e) {} }
   return mem.token;
 }
 
