@@ -345,6 +345,8 @@
   ["cPrice", "cShares", "cEquity", "cGain", "cDisc", "cSales"].forEach((id) => $("#" + id).addEventListener("input", calc));
   $("#rangeSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; $$("#rangeSeg button").forEach((x) => x.classList.toggle("on", x === b)); drawChart(+b.dataset.d); });
   calc(); peers(); drawChart(180); drawPBRBand();
-  loadPrice(); loadDaily(); loadInvestor(); loadWebLog(); loadLiveNews(); loadPeers();
+  loadWebLog(); loadLiveNews();
+  // 시세는 순서대로: 현재가로 토큰을 먼저 확보한 뒤 나머지 (토큰 발급 1분 1회 제한 대응)
+  (async () => { await loadPrice(); await loadDaily(); await loadInvestor(); await loadPeers(); })();
   setInterval(() => { const h = (new Date().getUTCHours() + 9) % 24; if (h >= 9 && h < 16) loadPrice(); }, 60000);
 })();
