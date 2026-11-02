@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>실시간 주가 추적 대시보드</title>
+  <style>
+    body { font-family: 'Noto Sans KR', sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+    .card { background: white; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); width: 100%; max-width: 360px; text-align: center; }
+    h2 { margin-top: 0; color: #1a1a1a; font-size: 22px; }
+    input { width: 65%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; outline: none; }
+    button { padding: 12px 18px; border: none; background-color: #0066ff; color: white; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+    button:hover { background-color: #0052cc; }
+    .price-box { margin-top: 25px; padding: 15px; background: #f8f9fa; border-radius: 12px; }
+    .price { font-size: 32px; font-weight: bold; color: #d32f2f; margin: 10px 0; }
+    .sub-info { font-size: 14px; color: #666; margin: 5px 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>📈 실시간 주가 추적기</h2>
+    <div style="margin-bottom: 15px;">
+      <input type="text" id="code" value="005930" placeholder="종목코드 6자리">
+      <button onclick="fetchStockPrice()">조회</button>
+    </div>
+
+    <div id="result" class="price-box" style="display:none;">
+      <div class="sub-info">현재가</div>
+      <div class="price" id="currentPrice">0 원</div>
+      <div class="sub-info">전일 대비: <span id="diff" style="font-weight:bold;">0</span> 원</div>
+      <div class="sub-info">등락률: <span id="rate" style="font-weight:bold;">0</span>%</div>
+    </div>
+  </div>
+
+  <script>
+    async function fetchStockPrice() {
+      const code = document.getElementById('code').value;
+      const priceElement = document.getElementById('currentPrice');
+      
+      document.getElementById('result').style.display = 'block';
+      priceElement.innerText = "조회 중...";
+
+      try {
+        const res = await fetch(`/.netlify/functions/stock?code=${code}`);
+        const data = await res.json();
+
+        if (data && data.stck_prpr) {
+          priceElement.innerText = Number(data.stck_prpr).toLocaleString() + ' 원';
+          document.getElementById('diff').innerText = Number(data.prdy_vrss).toLocaleString();
+          document.getElementById('rate').innerText = data.prdy_ctrt;
+        } else {
+          alert('주가 정보를 가져오지 못했습니다. 종목코드를 확인해 주세요.');
+        }
+      } catch (err) {
+        alert('서버 통신 오류가 발생했습니다.');
+      }
+    }
+  </script>
+</body>
+</html>
