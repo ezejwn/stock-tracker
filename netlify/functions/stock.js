@@ -27,25 +27,28 @@ function tokenStore(event) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// 앱키별로 토큰을 따로 저장 → 앱키를 재발급·교체하면 예전 토큰을 자동으로 버림
+const KEYID = KEY ? require("crypto").createHash("sha256").update(String(KEY)).digest("hex").slice(0, 12) : "none";
+const TOKEN_KEY = "token-" + KEYID, LOCK_KEY = "lock-" + KEYID;
 const fresh = (c) => c && c.token && c.exp - Date.now() > 5 * 60e3;
 
 // 동시에 여러 요청이 와도 토큰은 한 번만 발급 (KIS: 발급 1분 1회 제한)
-async function getToken(event) {
-  if (fresh(mem)) return mem.token;
+async function getToken(event, force) {
+  if (!force && fresh(mem)) return mem.token;
   const store = tokenStore(event);
-  const read = async () => { try { return store ? await store.get("token", { type: "json" }) : null; } catch (e) { return null; } };
+  const read = async () => { try { return store ? await store.get(TOKEN_KEY, { type: "json" }) : null; } catch (e) { return null; } };
 
-  let c = await read();
+  let c = force ? null : await read();
   if (fresh(c)) { mem = c; return c.token; }
 
   // 다른 요청이 발급 중이면(잠금 20초) 그 결과를 기다림
   if (store) {
     let lock = null;
-    try { lock = await store.get("lock", { type: "json" }); } catch (e) {}
+    try { lock = await store.get(LOCK_KEY, { type: "json" }); } catch (e) {}
     if (lock && Date.now() - lock.at < 20e3) {
       for (let i = 0; i < 12; i++) { await sleep(500); c = await read(); if (fresh(c)) { mem = c; return c.token; } }
     }
-    try { await store.setJSON("lock", { at: Date.now() }); } catch (e) {}
+    try { await store.setJSON(LOCK_KEY, { at: Date.now() }); } catch (e) {}
   }
 
   const issue = async () => {
@@ -66,12 +69,12 @@ async function getToken(event) {
     throw new Error("토큰 발급 실패: " + msg + (/1분|EGW00133/.test(msg + (j.error_code || "")) ? " (1분 뒤 새로고침)" : ""));
   }
   mem = { token: j.access_token, exp: Date.now() + (Number(j.expires_in) || 86400) * 1000 };
-  if (store) { try { await store.setJSON("token", mem); await store.delete("lock"); } catch (e) {} }
+  if (store) { try { await store.setJSON(TOKEN_KEY, mem); await store.delete(LOCK_KEY); } catch (e) {} }
   return mem.token;
 }
 
-async function kis(event, path, trId, params) {
-  const token = await getToken(event);
+async function kis(event, path, trId, params, retried) {
+  const token = await getToken(event, retried === "token");
   const r = await doFetch(`${BASE}${path}?${new URLSearchParams(params)}`, {
     headers: {
       "content-type": "application/json; charset=utf-8",
@@ -82,10 +85,18 @@ async function kis(event, path, trId, params) {
       custtype: "P",
     },
   });
-  const j = await r.json();
+  const j = await r.json().catch(() => ({ rt_cd: "1", msg1: "HTTP " + r.status }));
   if (j.rt_cd && j.rt_cd !== "0") {
-    if (/token|토큰/i.test(j.msg1 || "")) mem = { token: null, exp: 0 }; // 만료 토큰이면 다음 호출에 재발급
-    throw new Error(`${trId}: ${j.msg1 || j.msg_cd}`);
+    const m = `${j.msg_cd || ""} ${j.msg1 || ""}`;
+    // 토큰 무효·만료(EGW00121/00123) → 저장된 토큰 버리고 새로 받아 한 번 재시도
+    if (!retried && /EGW0012[123]|token|토큰/i.test(m)) {
+      mem = { token: null, exp: 0 };
+      try { const st = tokenStore(event); if (st) await st.delete(TOKEN_KEY); } catch (e) {}
+      return kis(event, path, trId, params, "token");
+    }
+    // 초당 호출 제한(EGW00201) → 잠깐 쉬고 한 번 재시도
+    if (!retried && /EGW00201|초당/.test(m)) { await sleep(400); return kis(event, path, trId, params, "rate"); }
+    throw new Error(`${trId}: ${(j.msg1 || j.msg_cd || "").trim()}`);
   }
   return j;
 }
