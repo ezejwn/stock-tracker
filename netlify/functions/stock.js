@@ -3,6 +3,9 @@
 //   /.netlify/functions/stock?code=368600&type=price      → 정리된 현재가 {ok, data}
 //   /.netlify/functions/stock?code=368600&type=daily      → 일봉(수정주가)
 //   /.netlify/functions/stock?code=368600&type=investor   → 투자자별 순매수
+//   /.netlify/functions/stock?type=index&codes=0001,1001   → 코스피·코스닥 지수
+//   /.netlify/functions/stock?type=indexdaily&icode=1001   → 지수 일봉
+//   /.netlify/functions/stock?type=multi&codes=005930,...  → 여러 종목 현재가
 // 환경변수: KIS_APPKEY, KIS_APPSECRET
 
 const BASE = process.env.KIS_BASE_URL || "https://openapi.koreainvestment.com:9443";
@@ -24,25 +27,28 @@ function tokenStore(event) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// 앱키별로 토큰을 따로 저장 → 앱키를 재발급·교체하면 예전 토큰을 자동으로 버림
+const KEYID = KEY ? require("crypto").createHash("sha256").update(String(KEY)).digest("hex").slice(0, 12) : "none";
+const TOKEN_KEY = "token-" + KEYID, LOCK_KEY = "lock-" + KEYID;
 const fresh = (c) => c && c.token && c.exp - Date.now() > 5 * 60e3;
 
 // 동시에 여러 요청이 와도 토큰은 한 번만 발급 (KIS: 발급 1분 1회 제한)
-async function getToken(event) {
-  if (fresh(mem)) return mem.token;
+async function getToken(event, force) {
+  if (!force && fresh(mem)) return mem.token;
   const store = tokenStore(event);
-  const read = async () => { try { return store ? await store.get("token", { type: "json" }) : null; } catch (e) { return null; } };
+  const read = async () => { try { return store ? await store.get(TOKEN_KEY, { type: "json" }) : null; } catch (e) { return null; } };
 
-  let c = await read();
+  let c = force ? null : await read();
   if (fresh(c)) { mem = c; return c.token; }
 
   // 다른 요청이 발급 중이면(잠금 20초) 그 결과를 기다림
   if (store) {
     let lock = null;
-    try { lock = await store.get("lock", { type: "json" }); } catch (e) {}
+    try { lock = await store.get(LOCK_KEY, { type: "json" }); } catch (e) {}
     if (lock && Date.now() - lock.at < 20e3) {
       for (let i = 0; i < 12; i++) { await sleep(500); c = await read(); if (fresh(c)) { mem = c; return c.token; } }
     }
-    try { await store.setJSON("lock", { at: Date.now() }); } catch (e) {}
+    try { await store.setJSON(LOCK_KEY, { at: Date.now() }); } catch (e) {}
   }
 
   const issue = async () => {
@@ -63,12 +69,12 @@ async function getToken(event) {
     throw new Error("토큰 발급 실패: " + msg + (/1분|EGW00133/.test(msg + (j.error_code || "")) ? " (1분 뒤 새로고침)" : ""));
   }
   mem = { token: j.access_token, exp: Date.now() + (Number(j.expires_in) || 86400) * 1000 };
-  if (store) { try { await store.setJSON("token", mem); await store.delete("lock"); } catch (e) {} }
+  if (store) { try { await store.setJSON(TOKEN_KEY, mem); await store.delete(LOCK_KEY); } catch (e) {} }
   return mem.token;
 }
 
-async function kis(event, path, trId, params) {
-  const token = await getToken(event);
+async function kis(event, path, trId, params, retried) {
+  const token = await getToken(event, retried === "token");
   const r = await doFetch(`${BASE}${path}?${new URLSearchParams(params)}`, {
     headers: {
       "content-type": "application/json; charset=utf-8",
@@ -79,10 +85,18 @@ async function kis(event, path, trId, params) {
       custtype: "P",
     },
   });
-  const j = await r.json();
+  const j = await r.json().catch(() => ({ rt_cd: "1", msg1: "HTTP " + r.status }));
   if (j.rt_cd && j.rt_cd !== "0") {
-    if (/token|토큰/i.test(j.msg1 || "")) mem = { token: null, exp: 0 }; // 만료 토큰이면 다음 호출에 재발급
-    throw new Error(`${trId}: ${j.msg1 || j.msg_cd}`);
+    const m = `${j.msg_cd || ""} ${j.msg1 || ""}`;
+    // 토큰 무효·만료(EGW00121/00123) → 저장된 토큰 버리고 새로 받아 한 번 재시도
+    if (!retried && /EGW0012[123]|token|토큰/i.test(m)) {
+      mem = { token: null, exp: 0 };
+      try { const st = tokenStore(event); if (st) await st.delete(TOKEN_KEY); } catch (e) {}
+      return kis(event, path, trId, params, "token");
+    }
+    // 초당 호출 제한(EGW00201) → 잠깐 쉬고 한 번 재시도
+    if (!retried && /EGW00201|초당/.test(m)) { await sleep(400); return kis(event, path, trId, params, "rate"); }
+    throw new Error(`${trId}: ${(j.msg1 || j.msg_cd || "").trim()}`);
   }
   return j;
 }
@@ -102,6 +116,7 @@ const tidyPrice = (o) => ({
   volume: num(o.acml_vol), tradeValue: num(o.acml_tr_pbmn), marketCapEok: num(o.hts_avls),
   per: num(o.per), pbr: num(o.pbr), eps: num(o.eps), bps: num(o.bps),
   w52High: num(o.w52_hgpr), w52Low: num(o.w52_lwpr), shares: num(o.lstn_stcn), foreignRatio: num(o.hts_frgn_ehrt),
+  sector: o.bstp_kor_isnm || null, market: o.rprs_mrkt_kor_name || null,
 });
 
 async function dailyChunk(event, code, from, to) {
@@ -133,6 +148,33 @@ async function investor(event, code) {
   }));
 }
 
+// 업종·시장 지수 (0001 코스피, 1001 코스닥, 2001 코스피200)
+async function index(event, icode) {
+  const j = await kis(event, "/uapi/domestic-stock/v1/quotations/inquire-index-price", "FHPUP02100000", {
+    FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: icode,
+  });
+  const o = j.output || {};
+  return { code: icode, value: num(o.bstp_nmix_prpr), change: num(o.bstp_nmix_prdy_vrss), changeRate: num(o.bstp_nmix_prdy_ctrt) };
+}
+async function indexDaily(event, icode, days) {
+  const end = new Date(Date.now() + 9 * 3600e3), start = new Date(end.getTime() - days * 86400e3);
+  const j = await kis(event, "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice", "FHKUP03500100", {
+    FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: icode, FID_INPUT_DATE_1: ymd(start), FID_INPUT_DATE_2: ymd(end), FID_PERIOD_DIV_CODE: "D",
+  });
+  return (j.output2 || []).filter((r) => r.stck_bsop_date).map((r) => ({ d: r.stck_bsop_date, c: num(r.bstp_nmix_prpr) }))
+    .sort((a, b) => a.d.localeCompare(b.d));
+}
+// 여러 종목 현재가를 한 번에 (초당 호출 제한 고려해 순차 호출)
+async function multi(event, codes) {
+  const out = [];
+  for (const c of codes) {
+    try { out.push({ code: c, ok: true, ...tidyPrice(await price(event, c)) }); }
+    catch (e) { out.push({ code: c, ok: false, error: String(e.message || e) }); }
+    await sleep(70);
+  }
+  return out;
+}
+
 const res = (body, status = 200, cacheSec = 0) => ({
   statusCode: status,
   headers: {
@@ -156,7 +198,23 @@ exports.handler = async function (event) {
       return res({ ok: true, code, data: await daily(event, code, days) }, 200, 600);
     }
     if (type === "investor") return res({ ok: true, code, data: await investor(event, code) }, 200, 300);
-    return res({ ok: false, error: "type은 price | daily | investor" }, 400);
+    if (type === "index") {
+      const codes = String(q.codes || "0001,1001").split(",").map((x) => x.replace(/\D/g, "").slice(0, 4)).filter(Boolean).slice(0, 6);
+      const data = [];
+      for (const c of codes) { try { data.push({ ok: true, ...(await index(event, c)) }); } catch (e) { data.push({ code: c, ok: false, error: String(e.message || e) }); } await sleep(70); }
+      return res({ ok: true, data }, 200, 30);
+    }
+    if (type === "indexdaily") {
+      const icode = String(q.icode || "1001").replace(/\D/g, "").slice(0, 4);
+      const days = Math.min(Math.max(Number(q.days) || 180, 20), 150);
+      return res({ ok: true, icode, data: await indexDaily(event, icode, days) }, 200, 600);
+    }
+    if (type === "multi") {
+      const codes = [...new Set(String(q.codes || "").split(",").map((x) => x.replace(/\D/g, "").slice(0, 6)).filter((x) => x.length === 6))].slice(0, 25);
+      if (!codes.length) return res({ ok: false, error: "codes=005930,000660 형식으로 넣어 주세요" }, 400);
+      return res({ ok: true, at: new Date().toISOString(), data: await multi(event, codes) }, 200, 30);
+    }
+    return res({ ok: false, error: "type은 price | daily | investor | index | indexdaily | multi" }, 400);
   } catch (e) {
     return res({ ok: false, error: String(e.message || e) }, 502);
   }
