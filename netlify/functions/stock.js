@@ -3,6 +3,9 @@
 //   /.netlify/functions/stock?code=368600&type=price      → 정리된 현재가 {ok, data}
 //   /.netlify/functions/stock?code=368600&type=daily      → 일봉(수정주가)
 //   /.netlify/functions/stock?code=368600&type=investor   → 투자자별 순매수
+//   /.netlify/functions/stock?type=index&codes=0001,1001   → 코스피·코스닥 지수
+//   /.netlify/functions/stock?type=indexdaily&icode=1001   → 지수 일봉
+//   /.netlify/functions/stock?type=multi&codes=005930,...  → 여러 종목 현재가
 // 환경변수: KIS_APPKEY, KIS_APPSECRET
 
 const BASE = process.env.KIS_BASE_URL || "https://openapi.koreainvestment.com:9443";
@@ -102,6 +105,7 @@ const tidyPrice = (o) => ({
   volume: num(o.acml_vol), tradeValue: num(o.acml_tr_pbmn), marketCapEok: num(o.hts_avls),
   per: num(o.per), pbr: num(o.pbr), eps: num(o.eps), bps: num(o.bps),
   w52High: num(o.w52_hgpr), w52Low: num(o.w52_lwpr), shares: num(o.lstn_stcn), foreignRatio: num(o.hts_frgn_ehrt),
+  sector: o.bstp_kor_isnm || null, market: o.rprs_mrkt_kor_name || null,
 });
 
 async function dailyChunk(event, code, from, to) {
@@ -133,6 +137,33 @@ async function investor(event, code) {
   }));
 }
 
+// 업종·시장 지수 (0001 코스피, 1001 코스닥, 2001 코스피200)
+async function index(event, icode) {
+  const j = await kis(event, "/uapi/domestic-stock/v1/quotations/inquire-index-price", "FHPUP02100000", {
+    FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: icode,
+  });
+  const o = j.output || {};
+  return { code: icode, value: num(o.bstp_nmix_prpr), change: num(o.bstp_nmix_prdy_vrss), changeRate: num(o.bstp_nmix_prdy_ctrt) };
+}
+async function indexDaily(event, icode, days) {
+  const end = new Date(Date.now() + 9 * 3600e3), start = new Date(end.getTime() - days * 86400e3);
+  const j = await kis(event, "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice", "FHKUP03500100", {
+    FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: icode, FID_INPUT_DATE_1: ymd(start), FID_INPUT_DATE_2: ymd(end), FID_PERIOD_DIV_CODE: "D",
+  });
+  return (j.output2 || []).filter((r) => r.stck_bsop_date).map((r) => ({ d: r.stck_bsop_date, c: num(r.bstp_nmix_prpr) }))
+    .sort((a, b) => a.d.localeCompare(b.d));
+}
+// 여러 종목 현재가를 한 번에 (초당 호출 제한 고려해 순차 호출)
+async function multi(event, codes) {
+  const out = [];
+  for (const c of codes) {
+    try { out.push({ code: c, ok: true, ...tidyPrice(await price(event, c)) }); }
+    catch (e) { out.push({ code: c, ok: false, error: String(e.message || e) }); }
+    await sleep(70);
+  }
+  return out;
+}
+
 const res = (body, status = 200, cacheSec = 0) => ({
   statusCode: status,
   headers: {
@@ -156,7 +187,23 @@ exports.handler = async function (event) {
       return res({ ok: true, code, data: await daily(event, code, days) }, 200, 600);
     }
     if (type === "investor") return res({ ok: true, code, data: await investor(event, code) }, 200, 300);
-    return res({ ok: false, error: "type은 price | daily | investor" }, 400);
+    if (type === "index") {
+      const codes = String(q.codes || "0001,1001").split(",").map((x) => x.replace(/\D/g, "").slice(0, 4)).filter(Boolean).slice(0, 6);
+      const data = [];
+      for (const c of codes) { try { data.push({ ok: true, ...(await index(event, c)) }); } catch (e) { data.push({ code: c, ok: false, error: String(e.message || e) }); } await sleep(70); }
+      return res({ ok: true, data }, 200, 30);
+    }
+    if (type === "indexdaily") {
+      const icode = String(q.icode || "1001").replace(/\D/g, "").slice(0, 4);
+      const days = Math.min(Math.max(Number(q.days) || 180, 20), 150);
+      return res({ ok: true, icode, data: await indexDaily(event, icode, days) }, 200, 600);
+    }
+    if (type === "multi") {
+      const codes = [...new Set(String(q.codes || "").split(",").map((x) => x.replace(/\D/g, "").slice(0, 6)).filter((x) => x.length === 6))].slice(0, 25);
+      if (!codes.length) return res({ ok: false, error: "codes=005930,000660 형식으로 넣어 주세요" }, 400);
+      return res({ ok: true, at: new Date().toISOString(), data: await multi(event, codes) }, 200, 30);
+    }
+    return res({ ok: false, error: "type은 price | daily | investor | index | indexdaily | multi" }, 400);
   } catch (e) {
     return res({ ok: false, error: String(e.message || e) }, 502);
   }

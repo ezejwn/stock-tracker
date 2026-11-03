@@ -157,6 +157,27 @@ footer{padding:30px 0 60px;color:var(--ink3);font-size:12px}
 .segbar div{display:flex;align-items:center;justify-content:center;color:#fff;font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden}
 .legend-tags{font-size:12.5px;color:var(--ink2)}
 details.box summary{cursor:pointer;font-weight:600;font-size:14px}
+
+.exp-btn{width:100%;display:flex;justify-content:space-between;align-items:center;gap:10px;background:none;border:0;padding:16px 24px;font:inherit;text-align:left;cursor:pointer;color:var(--ink)}
+.exp-btn:hover{background:#f8fafb}
+.exp-btn .chev{transition:transform .2s;color:var(--ink3)}
+.exp-btn[aria-expanded=true] .chev{transform:rotate(180deg)}
+.exp-body{padding:0 24px 20px;border-top:1px solid var(--line)}
+.today{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:14px 0}
+.today .tile .v{font-size:18px}
+.mv{border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:8px 0;background:#fff}
+.mv .mh{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.mv .md{font-weight:700;font-variant-numeric:tabular-nums}
+.mv .mr{font-size:17px;font-weight:800;font-variant-numeric:tabular-nums}
+.mv .meta{font-size:12.5px;color:var(--ink2)}
+.mv ul{margin:6px 0 0;padding-left:18px;font-size:13.5px}
+.mv li{margin:2px 0}
+.chip{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:6px;background:#eef1f5;color:var(--ink2);margin-right:4px}
+.bar{position:relative;height:8px;background:#f0f2f5;border-radius:4px;min-width:80px}
+.bar i{position:absolute;top:0;bottom:0;border-radius:4px}
+.tabs{margin-top:14px}
+.tabs button{font-size:13px;padding:6px 14px}
+.thm{margin:12px 0 4px;display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
 @media (max-width:760px){.cols3{grid-template-columns:1fr}.addform{grid-template-columns:1fr 1fr}}
 </style>
 </head>
@@ -209,6 +230,41 @@ details.box summary{cursor:pointer;font-weight:600;font-size:14px}
       </div>
       <svg id="chart" viewBox="0 0 640 220" preserveAspectRatio="none"></svg>
       <div id="invBox" class="small" style="margin-top:8px"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 왜 움직였나 -->
+<section id="why" style="margin-top:-14px">
+  <div class="card" style="padding:0">
+    <button class="exp-btn" id="whyBtn" aria-expanded="false">
+      <span><b>📉📈 주가가 왜 움직였나</b> <span class="muted small" id="whyHint">오늘 등락 · 시장 대비 · 수급 · 같은 날 나온 뉴스 · 큰 변동일</span></span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="exp-body" id="whyBody" hidden>
+      <div id="whyToday"></div>
+      <h3>최근 6개월 큰 움직임</h3>
+      <p class="muted small" style="margin-top:0">하루 등락 ±5% 이상이거나 거래량이 평소(20일 평균)의 3배 이상인 날. 같은 날·전 거래일 이후 나온 뉴스와 기록, 그날 코스닥 등락, 수급을 함께 보여줍니다. <b>자동 매칭은 '같은 시기에 있었던 일'이지 원인을 확정한 것이 아닙니다.</b> 확인된 이유는 <span class="badge os-확인">확인</span>으로 표시합니다.</p>
+      <div class="filters" style="margin:0 0 8px"><div class="seg" id="moveFilter"><button data-f="all" class="on">전체</button><button data-f="up">상승</button><button data-f="down">하락</button></div></div>
+      <div id="whyMoves"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 주변 시장 -->
+<section id="around" style="margin-top:-14px">
+  <div class="card" style="padding:0">
+    <button class="exp-btn" id="aroundBtn" aria-expanded="false">
+      <span><b>🧭 다음 단계 — 주변 시장 함께 보기</b> <span class="muted small">동종기업 · 관련 테마 · 산업·시장 · 주요 이슈</span></span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="exp-body" id="aroundBody" hidden>
+      <div class="seg tabs" id="aroundTabs">
+        <button data-t="peers" class="on">동종기업</button><button data-t="themes">관련 테마</button><button data-t="market">산업·시장</button><button data-t="issues">주요 이슈</button>
+      </div>
+      <div id="aroundSummary" class="small" style="margin:10px 0"></div>
+      <div id="aroundPane"></div>
+      <p class="muted small" style="margin-top:10px">등락률은 KIS 실시간(30초 캐시). 테마 구성 종목은 <code>public/data/ich-data.js</code>의 <code>MARKET</code>에서 바꿀 수 있습니다.</p>
     </div>
   </div>
 </section>
@@ -547,5 +603,6 @@ details.box summary{cursor:pointer;font-weight:600;font-size:14px}
 
 <script src="data/ich-data.js"></script>
 <script src="app.js"></script>
+<script src="market.js"></script>
 </body>
 </html>
