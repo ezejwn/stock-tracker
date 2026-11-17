@@ -251,7 +251,7 @@
     try {
       const r = await fetch("/.netlify/functions/news?display=20&query=" + encodeURIComponent(liveQ)); const j = await r.json();
       if (!j.ok) throw new Error(j.error);
-      LIVENEWS = j.data; renderLiveNews();
+      LIVENEWS = j.data; $("#liveSrc").textContent = j.source === "naver-stock-archive" ? "네이버 증권 종목뉴스 · 최신순" : j.source === "google-news" ? "Google 뉴스 · 최신순" : "네이버 뉴스 검색 · 최신순"; renderLiveNews();
     } catch (e) {
       $("#liveNews").innerHTML = `<p class="muted">뉴스 API 미연결 — Netlify 환경변수에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET을 넣으면 표시됩니다.</p>`;
     }
