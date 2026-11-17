@@ -5,3 +5,7 @@
 [functions]
   node_bundler = "esbuild"
   external_node_modules = ["@netlify/blobs"]
+
+# 네이버 증권 아이씨에이치 뉴스 자동 수집 (30분마다)
+[functions."news-collect"]
+  schedule = "*/30 * * * *"

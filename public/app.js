@@ -15,12 +15,12 @@
 
   let LIVE = { price: D.META.refPrice, shares: D.META.sharesEst, ok: false };
   let DAILY = [];
-  let WEBLOG = [];
+  let WEBLOG = [], FEED = [], FEEDINFO = {};
 
   /* ---------- 머리 ---------- */
   function header() {
     $("#created").textContent = D.META.created;
-    const dates = [...D.LOG.map((l) => l.date), ...D.CHANGELOG.map((c) => c[0]), ...WEBLOG.map((l) => l.date)];
+    const dates = [...D.LOG.map((l) => l.date), ...D.CHANGELOG.map((c) => c[0]), ...WEBLOG.map((l) => l.date), ...FEED.slice(0, 1).map((f) => f.date)];
     $("#lastUpdated").textContent = dates.sort().slice(-1)[0] || D.META.created;
     $("#logCount").textContent = D.LOG.length + WEBLOG.length;
     $$(".eqAsOf").forEach((e) => (e.textContent = D.META.equityAsOf));
@@ -143,20 +143,29 @@
       WEBLOG = [];
       $("#fMsg").textContent = "기록 API 미연결 — 배포 후 사용 가능 (데이터 파일 기록은 그대로 보임)";
     }
-    logs();
+    logs(); openQs(); news($("#newsSearch").value);
     if (typeof renderLiveNews === "function" && LIVENEWS.length) renderLiveNews();
   }
+  $("#fOpen").innerHTML = `<option value="">'확인할 것' 질문과 연결 안 함</option>` + D.OPEN.map((o, i) => `<option value="${i + 1}">Q${i + 1}. ${esc(o.q).slice(0, 60)}</option>`).join("");
+  $("#fOpen").addEventListener("change", () => { $("#fOpenSt").style.display = $("#fOpen").value ? "" : "none"; });
+  function openAdd(type) {
+    const box = $("#addBox"); box.open = true;
+    if (type) $("#fType").value = type;
+    box.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => $("#fTitle").focus(), 350);
+  }
+  $("#fab").addEventListener("click", () => openAdd("미팅"));
   $("#fDate").value = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
   $("#fSave").addEventListener("click", async () => {
     const token = $("#fToken").value.trim();
     ls.set("token", token);
-    const body = { date: $("#fDate").value, type: $("#fType").value, src: $("#fSrc").value, title: $("#fTitle").value, body: $("#fBody").value, link: $("#fLink").value, visibility: $("#fVis").value };
+    const body = { date: $("#fDate").value, type: $("#fType").value, src: $("#fSrc").value, title: $("#fTitle").value, body: $("#fBody").value, link: $("#fLink").value, visibility: $("#fVis").value, openIdx: $("#fOpen").value, openStatus: $("#fOpenSt").value };
     $("#fMsg").textContent = "저장 중…";
     try {
       const r = await fetch("/.netlify/functions/notes", { method: "POST", headers: { "content-type": "application/json", "x-admin-token": token }, body: JSON.stringify(body) });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error);
-      $("#fTitle").value = ""; $("#fBody").value = ""; $("#fLink").value = "";
+      $("#fTitle").value = ""; $("#fBody").value = ""; $("#fLink").value = ""; $("#fOpen").value = "";
       $("#fMsg").textContent = "저장했습니다.";
       await loadWebLog();
     } catch (e) { $("#fMsg").textContent = "실패: " + e.message; }
@@ -172,27 +181,71 @@
   let openSt = "전체";
   function openQs() {
     const sts = ["전체", "미확인", "일부", "확인"];
-    $("#openFilter").innerHTML = `<div class="seg">${sts.map((s) => `<button data-s="${s}" class="${s === openSt ? "on" : ""}">${s}${s === "전체" ? "" : " " + D.OPEN.filter((o) => o.status === s).length}</button>`).join("")}</div>`;
-    const list = D.OPEN.filter((o) => openSt === "전체" || o.status === openSt);
+    // 사이트에서 추가한 기록 중 질문에 연결된 답을 반영 (최신 기록의 상태가 우선)
+    const OPEN = D.OPEN.map((o, i) => {
+      const ans = WEBLOG.filter((l) => l.openIdx === i + 1).sort((a, b) => a.date.localeCompare(b.date));
+      if (!ans.length) return o;
+      const last = ans[ans.length - 1];
+      return { ...o, status: last.openStatus || o.status, webAns: ans };
+    });
+    const list = OPEN.filter((o) => openSt === "전체" || o.status === openSt);
+    $("#openFilter").innerHTML = `<div class="seg">${sts.map((s) => `<button data-s="${s}" class="${s === openSt ? "on" : ""}">${s}${s === "전체" ? "" : " " + OPEN.filter((o) => o.status === s).length}</button>`).join("")}</div>`;
     $("#openTbl").innerHTML = "<thead><tr><th style='width:34px'>#</th><th>확인할 것</th><th>왜</th><th>상태</th><th>들은 내용</th></tr></thead><tbody>" +
-      list.map((o) => `<tr><td class="muted">${D.OPEN.indexOf(o) + 1}</td><td>${esc(o.q)}</td><td class="small muted">${esc(o.why)}</td><td><span class="badge os-${o.status}">${o.status}</span></td><td class="small">${o.answer ? esc(o.answer) + (o.date ? ` <span class="muted">${o.date}</span>` : "") : "–"}</td></tr>`).join("") + "</tbody>";
+      list.map((o) => `<tr><td class="muted">${OPEN.indexOf(o) + 1}</td><td>${esc(o.q)}</td><td class="small muted">${esc(o.why)}</td><td><span class="badge os-${o.status}">${o.status}</span></td><td class="small">${o.answer ? esc(o.answer) + (o.date ? ` <span class="muted">${o.date}</span>` : "") : (o.webAns ? "" : "–")}${(o.webAns || []).map((l) => `<div style="margin-top:3px">${esc((l.body && l.body.length ? l.body.join(" · ") : l.title))} <span class="muted">${l.date} · ${l.type}</span></div>`).join("")}</td></tr>`).join("") + "</tbody>";
   }
   $("#openFilter").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { openSt = b.dataset.s; openQs(); } });
 
   /* ---------- 기사 ---------- */
+  const nkey = (u) => { const m = String(u || "").match(/article\/(\d{3})\/(\d{6,})/); return m ? m[1] + "-" + m[2] : String(u || ""); };
+  const ntitle = (t) => String(t || "").replace(/[\s"'“”‘’\[\]【】()<>…·.,!?~\-–—]/g, "").toLowerCase();
+  function allNews() {
+    // [월, 제목, 링크, 자동수집 항목]
+    const seenK = new Set(), seenT = new Set(), out = [];
+    const push = (m, t, l, f) => { const k = nkey(l), tt = ntitle(t); if (seenK.has(k) || seenT.has(tt)) return; seenK.add(k); seenT.add(tt); out.push([m, t, l, f]); };
+    FEED.forEach((f) => push(f.date.slice(0, 7), f.title, f.link, f));
+    D.NEWS.forEach((n) => push(n[0], n[1], n[2], null));
+    return out;
+  }
   function news(q = "") {
     q = q.trim().toLowerCase();
-    const list = D.NEWS.filter((n) => !q || n[1].toLowerCase().includes(q));
+    const list = allNews().filter((n) => !q || n[1].toLowerCase().includes(q));
     const byM = {};
     list.forEach((n) => (byM[n[0]] = byM[n[0]] || []).push(n));
-    $("#newsList").innerHTML = Object.keys(byM).sort().reverse().map((m) => `<h3 style="font-size:14px;margin:14px 0 4px">${m.replace("-", ".")}</h3><ul style="margin:0;padding-left:18px">${byM[m].map((n) => `<li><a href="${n[2]}" target="_blank" rel="noopener">${esc(n[1])}</a></li>`).join("")}</ul>`).join("");
-    $("#newsCount").textContent = `${list.length}건`;
+    const recent = Date.now() - 3 * 86400e3;
+    $("#newsList").innerHTML = Object.keys(byM).sort().reverse().map((m) => `<h3 style="font-size:14px;margin:14px 0 4px">${m.replace("-", ".")}</h3><ul style="margin:0;padding-left:18px">${byM[m].map((n) => {
+      const f = n[3];
+      const meta = f ? ` <span class="muted">${f.date.slice(5).replace("-", ".")}${f.press ? " · " + esc(f.press) : ""}</span>${new Date(f.collectedAt).getTime() > recent ? ' <span class="badge os-미확인">NEW</span>' : ""}${ADMIN ? ` <button class="btn" data-hide="${esc(f.id)}" title="관련 없는 기사 숨기기" style="padding:0 6px;font-size:11px">숨김</button>` : ""}` : "";
+      return `<li><a href="${esc(n[2])}" target="_blank" rel="noopener">${esc(n[1])}</a>${meta}</li>`;
+    }).join("")}</ul>`).join("");
+    $("#newsCount").textContent = `${list.length}건` + (FEED.length ? ` (자동 수집 ${FEED.length}건)` : "");
   }
+  async function loadFeed(refresh) {
+    $("#feedInfo").textContent = refresh ? "수집 중…" : "";
+    try {
+      const r = await fetch("/.netlify/functions/newsfeed" + (refresh ? "?refresh=1" : "")); const j = await r.json();
+      if (!j.ok) throw new Error(j.error);
+      FEED = j.data || []; FEEDINFO = j;
+      const t = j.lastRun ? new Date(j.lastRun).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "–";
+      const add = j.run && j.run.added ? ` · 방금 ${j.run.added}건 추가` : "";
+      $("#feedInfo").textContent = `네이버 증권 자동 수집 · 30분마다 · 마지막 확인 ${t}${add}` + (j.lastError ? ` · 일부 오류: ${j.lastError}` : "");
+      news($("#newsSearch").value); header();
+      if (LIVENEWS.length) renderLiveNews();
+    } catch (e) {
+      $("#feedInfo").textContent = "자동 수집 API 미연결 — 배포 후 동작합니다.";
+    }
+  }
+  $("#feedRefresh").addEventListener("click", () => loadFeed(true));
+  $("#newsList").addEventListener("click", async (e) => {
+    const id = e.target.dataset && e.target.dataset.hide; if (!id) return;
+    if (!confirm("이 기사를 아카이브에서 숨길까요? (다시 수집되지 않습니다)")) return;
+    await fetch("/.netlify/functions/newsfeed?hide=" + encodeURIComponent(id), { method: "POST", headers: { "x-admin-token": ls.get("token", "") } });
+    loadFeed();
+  });
   $("#newsSearch").addEventListener("input", (e) => news(e.target.value));
 
   /* ---------- 실시간 뉴스 (네이버) ---------- */
   let LIVENEWS = [], liveQ = "아이씨에이치";
-  const known = () => new Set([...D.NEWS.map((n) => n[2]), ...[...D.LOG, ...WEBLOG].map((l) => l.link).filter(Boolean)]);
+  const known = () => new Set([...D.NEWS.map((n) => n[2]), ...FEED.map((f) => f.link), ...[...D.LOG, ...WEBLOG].map((l) => l.link).filter(Boolean)]);
   async function loadLiveNews() {
     $("#liveNews").innerHTML = `<p class="muted">불러오는 중…</p>`;
     try {
@@ -345,7 +398,7 @@
   ["cPrice", "cShares", "cEquity", "cGain", "cDisc", "cSales"].forEach((id) => $("#" + id).addEventListener("input", calc));
   $("#rangeSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; $$("#rangeSeg button").forEach((x) => x.classList.toggle("on", x === b)); drawChart(+b.dataset.d); });
   calc(); peers(); drawChart(180); drawPBRBand();
-  loadWebLog(); loadLiveNews();
+  loadWebLog(); loadLiveNews(); loadFeed();
   // 시세는 순서대로: 현재가로 토큰을 먼저 확보한 뒤 나머지 (토큰 발급 1분 1회 제한 대응)
   (async () => { await loadPrice(); await loadDaily(); await loadInvestor(); await loadPeers(); })();
   setInterval(() => { const h = (new Date().getUTCHours() + 9) % 24; if (h >= 9 && h < 16) loadPrice(); }, 60000);

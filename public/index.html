@@ -144,6 +144,9 @@ footer{padding:30px 0 60px;color:var(--ink3);font-size:12px}
 .log .lt{font-weight:700}
 .log ul{margin:6px 0 0;padding-left:18px;font-size:14px;color:var(--ink2)}
 .log ul li{margin:2px 0}
+#fab{position:fixed;right:18px;bottom:18px;z-index:50;border:0;border-radius:999px;padding:11px 18px;font-size:14px;font-weight:600;background:var(--accent,#1f4fd1);color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.18);cursor:pointer}
+#fab:hover{filter:brightness(1.08)}
+@media print{#fab{display:none}}
 .log .web{font-size:11px;color:var(--ink3)}
 .addform{display:grid;grid-template-columns:140px 110px 110px 1fr;gap:8px;margin-top:10px}
 .addform input,.addform select,.addform textarea{padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13.5px;background:#fff}
@@ -515,8 +518,8 @@ details.box summary{cursor:pointer;font-weight:600;font-size:14px}
     <div id="logList"></div>
 
     <details class="box" id="addBox" style="margin-top:8px">
-      <summary>＋ 사이트에서 기록 추가 (관리 토큰 필요)</summary>
-      <p class="muted small">Netlify 환경변수 <code>NOTE_ADMIN_TOKEN</code>에 넣은 값을 입력하면 이 브라우저에 기억됩니다. 여기서 추가한 기록은 서버(Netlify Blobs)에 저장돼 모든 기기에서 보입니다. '비공개'로 고른 기록은 토큰이 있는 브라우저에서만 보입니다.</p>
+      <summary>＋ 기록 추가 — 미팅·IR·통화·새로 받은 정보 (관리 토큰 필요)</summary>
+      <p class="muted small">미팅 다녀온 뒤나 새 정보를 받았을 때 여기에 적으면 누적 기록 맨 위에 쌓입니다. '확인할 것' 질문의 답이면 아래에서 질문을 고르면 10번 표의 상태와 '들은 내용'도 함께 바뀝니다. 오른쪽 아래 <b>＋ 기록</b> 버튼으로 어디서든 바로 열 수 있습니다.<br>Netlify 환경변수 <code>NOTE_ADMIN_TOKEN</code>에 넣은 값을 입력하면 이 브라우저에 기억됩니다. 여기서 추가한 기록은 서버(Netlify Blobs)에 저장돼 모든 기기에서 보입니다. '비공개'로 고른 기록은 토큰이 있는 브라우저에서만 보입니다.</p>
       <div class="addform">
         <input type="date" id="fDate">
         <select id="fType"><option>미팅</option><option>IR</option><option>공시</option><option>기사</option><option>메모</option></select>
@@ -524,6 +527,8 @@ details.box summary{cursor:pointer;font-weight:600;font-size:14px}
         <input id="fTitle" placeholder="제목 (예: 3Q26 실적 발표 후 통화)">
         <textarea id="fBody" placeholder="내용 — 한 줄에 하나씩 적으면 항목으로 나뉩니다"></textarea>
         <input id="fLink" class="full" placeholder="링크 (선택)">
+        <select id="fOpen" class="full"></select>
+        <select id="fOpenSt" style="display:none"><option value="일부">일부 확인</option><option value="확인">확인 완료</option><option value="미확인">아직 미확인</option></select>
         <select id="fVis"><option value="public">공개</option><option value="private">비공개</option></select>
         <input type="password" id="fToken" placeholder="관리 토큰">
         <button class="btn primary" id="fSave">저장</button>
@@ -566,7 +571,8 @@ details.box summary{cursor:pointer;font-weight:600;font-size:14px}
     </div>
     <p class="muted small" style="margin:4px 0 8px">아카이브에 없는 새 기사에는 <span class="badge os-미확인">NEW</span> 표시. 관리 토큰이 있으면 "+ 기록"으로 누적 기록에 바로 넣을 수 있습니다.</p>
     <div id="liveNews" class="small"></div>
-    <h3>기사 아카이브</h3>
+    <h3>기사 아카이브 <span class="muted" style="font-weight:400;font-size:12.5px">새 기사가 나오면 자동으로 쌓입니다</span></h3>
+    <p class="muted small" style="margin:2px 0 6px"><span id="feedInfo"></span> <button class="btn" id="feedRefresh" style="padding:1px 8px;font-size:11.5px">지금 확인</button></p>
     <div class="filters"><input type="search" id="newsSearch" placeholder="기사 제목 검색"><span class="muted" id="newsCount"></span></div>
     <div id="newsList" class="news small"></div>
   </div>
@@ -601,6 +607,7 @@ details.box summary{cursor:pointer;font-weight:600;font-size:14px}
 </main>
 <footer><div class="wrap">아이씨에이치 기업 노트 · 368600</div></footer>
 
+<button id="fab" title="미팅·새 정보 기록 추가">＋ 기록</button>
 <script src="data/ich-data.js"></script>
 <script src="app.js"></script>
 <script src="market.js"></script>

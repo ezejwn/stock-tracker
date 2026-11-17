@@ -56,6 +56,12 @@ exports.handler = async function (event) {
       createdAt: new Date().toISOString(),
       fromWeb: true,
     };
+    // '확인할 것' 질문에 대한 답이면 질문 번호(1부터)와 상태를 함께 저장
+    const oi = parseInt(b.openIdx, 10);
+    if (oi > 0 && oi < 1000) {
+      entry.openIdx = oi;
+      entry.openStatus = ["미확인", "일부", "확인"].includes(b.openStatus) ? b.openStatus : "일부";
+    }
     all.unshift(entry);
     await store.setJSON("entries", all);
     return res({ ok: true, entry });
