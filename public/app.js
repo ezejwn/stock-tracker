@@ -227,7 +227,7 @@
       FEED = j.data || []; FEEDINFO = j;
       const t = j.lastRun ? new Date(j.lastRun).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "–";
       const add = j.run && j.run.added ? ` · 방금 ${j.run.added}건 추가` : "";
-      $("#feedInfo").textContent = `네이버 증권 자동 수집 · 30분마다 · 마지막 확인 ${t}${add}` + (j.lastError ? ` · 일부 오류: ${j.lastError}` : "");
+      $("#feedInfo").textContent = `네이버 증권 자동 수집 · 30분마다 · 마지막 확인 ${t}${add}` + (j.lastError ? (/^검색:/.test(j.lastError) && !/증권:/.test(j.lastError) ? " · (보조 검색 API 키 오류 — 네이버 증권 수집은 정상)" : ` · 오류: ${j.lastError}`) : "");
       news($("#newsSearch").value); header();
       if (LIVENEWS.length) renderLiveNews();
     } catch (e) {

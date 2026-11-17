@@ -68,9 +68,34 @@ async function fromNaverStock(pages = 2) {
   return out;
 }
 
+// 환경변수에 섞여 들어간 공백·줄바꿈·따옴표·"KEY=" 접두어를 걷어냄
+const cleanKey = (v) => String(v || "").replace(/^\s*[A-Z_]+\s*=\s*/, "").trim().replace(/^["'`]+|["'`]+$/g, "").replace(/\s+/g, "");
+const naverKeys = () => ({ ID: cleanKey(process.env.NAVER_CLIENT_ID), SECRET: cleanKey(process.env.NAVER_CLIENT_SECRET) });
+
+// 키 값은 보여주지 않고 형식만 점검
+async function diagnoseKeys() {
+  const rawId = process.env.NAVER_CLIENT_ID, rawSec = process.env.NAVER_CLIENT_SECRET;
+  const { ID, SECRET } = naverKeys();
+  const desc = (raw, clean, showEnds) => raw == null ? { 설정됨: false } : {
+    설정됨: true, 원래길이: String(raw).length, 정리후길이: clean.length,
+    앞뒤공백_줄바꿈: /^\s|\s$/.test(raw), 따옴표: /["'`]/.test(raw), 등호포함: raw.includes("="),
+    ...(showEnds ? { 앞2자: clean.slice(0, 2), 뒤2자: clean.slice(-2) } : {}),
+  };
+  const out = { NAVER_CLIENT_ID: desc(rawId, ID, true), NAVER_CLIENT_SECRET: desc(rawSec, SECRET, false),
+    참고: "정상 키는 보통 Client ID 20자, Client Secret 10자입니다. 길이가 반대면 둘이 바뀐 것입니다." };
+  if (ID && SECRET) {
+    try {
+      const r = await doFetch("https://openapi.naver.com/v1/search/news.json?query=%EC%95%84%EC%9D%B4%EC%94%A8%EC%97%90%EC%9D%B4%EC%B9%98&display=1", { headers: { "X-Naver-Client-Id": ID, "X-Naver-Client-Secret": SECRET } });
+      const j = await r.json().catch(() => ({}));
+      out.네이버응답 = r.ok ? "정상 (키 동작함)" : `${r.status} ${j.errorCode || ""} ${j.errorMessage || ""}`.trim();
+    } catch (e) { out.네이버응답 = "호출 실패: " + (e.message || e); }
+  }
+  return out;
+}
+
 // 2) 네이버 뉴스 검색 API (보조)
 async function fromNaverSearch() {
-  const ID = process.env.NAVER_CLIENT_ID, SECRET = process.env.NAVER_CLIENT_SECRET;
+  const { ID, SECRET } = naverKeys();
   if (!ID || !SECRET) return [];
   const r = await doFetch(`https://openapi.naver.com/v1/search/news.json?${new URLSearchParams({ query: "아이씨에이치", display: 50, sort: "date" })}`, {
     headers: { "X-Naver-Client-Id": ID, "X-Naver-Client-Secret": SECRET },
@@ -134,4 +159,4 @@ async function collect(store) {
   return { added, errors, total: arc.items.length, lastRun: now };
 }
 
-module.exports = { getStore, readArchive, collect };
+module.exports = { getStore, readArchive, collect, naverKeys, diagnoseKeys };

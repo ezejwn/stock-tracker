@@ -4,7 +4,7 @@
 //   POST /.netlify/functions/newsfeed?hide=ID    관련 없는 기사 숨기기 (x-admin-token 필요, 다시 수집되지 않음)
 // 정기 수집은 news-collect.js (30분마다)가 담당합니다.
 
-const { getStore, readArchive, collect } = require("../lib/newsfeed");
+const { getStore, readArchive, collect, diagnoseKeys } = require("../lib/newsfeed");
 const TOKEN = process.env.NOTE_ADMIN_TOKEN || "";
 const STALE_MS = 20 * 60e3;
 
@@ -16,6 +16,7 @@ const res = (b, s = 200) => ({
 const header = (event, k) => { const h = event.headers || {}; return h[k] || h[k.toLowerCase()] || ""; };
 
 exports.handler = async function (event) {
+  if ((event.queryStringParameters || {}).diag === "1") return res({ ok: true, 점검: await diagnoseKeys() });
   let store;
   try { store = getStore(event); } catch (e) { return res({ ok: false, error: "Netlify Blobs를 쓸 수 없습니다." }, 500); }
   const q = event.queryStringParameters || {};

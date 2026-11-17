@@ -20,7 +20,7 @@ const res = (body, status = 200) => ({
 });
 
 exports.handler = async function (event) {
-  const ID = process.env.NAVER_CLIENT_ID, SECRET = process.env.NAVER_CLIENT_SECRET;
+  const { ID, SECRET } = require("../lib/newsfeed").naverKeys();
   if (!ID || !SECRET) return res({ ok: false, error: "네이버 API 키(NAVER_CLIENT_ID / NAVER_CLIENT_SECRET)가 설정되지 않았습니다." }, 500);
   const q = event.queryStringParameters || {};
   const query = String(q.query || "아이씨에이치").slice(0, 100);
