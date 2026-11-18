@@ -147,6 +147,7 @@ footer{padding:30px 0 60px;color:var(--ink3);font-size:12px}
 #fab{position:fixed;right:18px;bottom:18px;z-index:50;border:0;border-radius:999px;padding:11px 18px;font-size:14px;font-weight:600;background:var(--accent,#1f4fd1);color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.18);cursor:pointer}
 #fab:hover{filter:brightness(1.08)}
 @media print{#fab{display:none}}
+#discList table{width:100%;border-collapse:collapse}#discList td{padding:5px 6px;border-bottom:1px solid #eef0f3;vertical-align:top}#discList td.d{white-space:nowrap;color:#6b7383;width:84px}#discList td.f{white-space:nowrap;color:#8a93a3;width:110px;font-size:12px}
 .log .web{font-size:11px;color:var(--ink3)}
 .addform{display:grid;grid-template-columns:140px 110px 110px 1fr;gap:8px;margin-top:10px}
 .addform input,.addform select,.addform textarea{padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13.5px;background:#fff}
@@ -197,7 +198,7 @@ details.box summary{cursor:pointer;font-weight:600;font-size:14px}
 <nav class="toc"><div class="wrap">
   <a href="#quote">시세</a><a href="#overview">개요</a><a href="#thesis">투자 관점</a><a href="#biz">사업</a><a href="#items">고객·아이템</a>
   <a href="#fin">실적·재무</a><a href="#capital">자본 이력</a><a href="#val">밸류</a><a href="#industry">산업</a>
-  <a href="#log">누적 기록</a><a href="#open">확인할 것</a><a href="#watch">일정·리스크</a><a href="#news">기사</a><a href="#history">연혁</a><a href="#glossary">용어</a><a href="#src">출처·이력</a>
+  <a href="#log">누적 기록</a><a href="#open">확인할 것</a><a href="#watch">일정·리스크</a><a href="#news">공시·기사</a><a href="#history">연혁</a><a href="#glossary">용어</a><a href="#src">출처·이력</a>
 </div></nav>
 
 <main class="wrap">
@@ -562,7 +563,12 @@ details.box summary{cursor:pointer;font-weight:600;font-size:14px}
 <!-- 기사 -->
 <section id="news">
   <div class="card">
-    <h2><span class="no">12</span>기사</h2>
+    <h2><span class="no">12</span>공시 · 기사</h2>
+    <h3 style="margin-top:0">공시 <span class="muted" style="font-weight:400;font-size:12.5px">새 공시가 뜨면 자동으로 쌓입니다</span></h3>
+    <p class="muted small" style="margin:2px 0 6px"><span id="discInfo"></span> <button class="btn" id="discRefresh" style="padding:1px 8px;font-size:11.5px">지금 확인</button></p>
+    <div class="filters"><input type="search" id="discSearch" placeholder="공시 제목 검색 (예: 공급계약, 전환사채)"><span class="muted" id="discCount"></span></div>
+    <div id="discList" class="small"></div>
+    <p style="margin:6px 0 14px"><button class="btn" id="discMore" style="display:none">전체 보기</button></p>
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <h3 style="margin:0">실시간 뉴스 <span class="muted" style="font-weight:400;font-size:12.5px" id="liveSrc">네이버 뉴스 검색 · 최신순</span></h3>
       <div class="filters" style="margin:0">

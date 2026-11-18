@@ -15,12 +15,12 @@
 
   let LIVE = { price: D.META.refPrice, shares: D.META.sharesEst, ok: false };
   let DAILY = [];
-  let WEBLOG = [], FEED = [], FEEDINFO = {};
+  let WEBLOG = [], FEED = [], FEEDINFO = {}, DISC = [], discAll = false;
 
   /* ---------- 머리 ---------- */
   function header() {
     $("#created").textContent = D.META.created;
-    const dates = [...D.LOG.map((l) => l.date), ...D.CHANGELOG.map((c) => c[0]), ...WEBLOG.map((l) => l.date), ...FEED.slice(0, 1).map((f) => f.date)];
+    const dates = [...D.LOG.map((l) => l.date), ...D.CHANGELOG.map((c) => c[0]), ...WEBLOG.map((l) => l.date), ...FEED.slice(0, 1).map((f) => f.date), ...DISC.slice(0, 1).map((x) => x.date)];
     $("#lastUpdated").textContent = dates.sort().slice(-1)[0] || D.META.created;
     $("#logCount").textContent = D.LOG.length + WEBLOG.length;
     $$(".eqAsOf").forEach((e) => (e.textContent = D.META.equityAsOf));
@@ -235,6 +235,35 @@
     }
   }
   $("#feedRefresh").addEventListener("click", () => loadFeed(true));
+
+  // 공시 아카이브 (DART·네이버 증권 자동 수집)
+  function discs() {
+    const q = $("#discSearch").value.trim().toLowerCase();
+    const list = DISC.filter((x) => !q || (x.title + " " + (x.filer || "")).toLowerCase().includes(q));
+    const show = discAll || q ? list : list.slice(0, 15);
+    const recent = Date.now() - 3 * 86400e3;
+    $("#discList").innerHTML = show.length ? `<table>${show.map((x) => `<tr><td class="d">${x.date.replace(/-/g, ".")}</td><td><a href="${esc(x.link)}" target="_blank" rel="noopener">${esc(x.title)}</a>${x.rm && /정|철/.test(x.rm) ? ` <span class="muted">(${esc(x.rm)})</span>` : ""}${x.collectedAt && new Date(x.collectedAt).getTime() > recent ? ' <span class="badge os-미확인">NEW</span>' : ""}</td><td class="f">${esc(x.filer || "")}</td></tr>`).join("")}</table>` : '<p class="muted">공시가 아직 없습니다.</p>';
+    $("#discCount").textContent = DISC.length ? `${list.length}건` : "";
+    $("#discMore").style.display = !q && list.length > 15 ? "" : "none";
+    $("#discMore").textContent = discAll ? "최근 15건만" : `전체 ${list.length}건 보기`;
+  }
+  async function loadDisc(refresh) {
+    $("#discInfo").textContent = refresh ? "확인 중…" : "";
+    try {
+      const r = await fetch("/.netlify/functions/disclosures" + (refresh ? "?refresh=1" : "")); const j = await r.json();
+      if (!j.ok) throw new Error(j.error);
+      DISC = j.data || [];
+      const t = j.lastRun ? new Date(j.lastRun).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "–";
+      const add = j.run && j.run.added ? ` · 방금 ${j.run.added}건 추가` : "";
+      $("#discInfo").textContent = `${(j.sources || []).join("·") || "자동"} 수집 · 30분마다 · 마지막 확인 ${t}${add}` + (!j.dartKey ? " · DART 키 미설정(네이버 증권 최근분만)" : "") + (j.lastError ? ` · 일부 오류: ${j.lastError}` : "");
+      discs(); header(); if (DAILY.length) drawChart(+$("#rangeSeg .on").dataset.d);
+    } catch (e) {
+      $("#discInfo").textContent = "공시 수집 API 미연결 — 배포 후 동작합니다.";
+    }
+  }
+  $("#discRefresh").addEventListener("click", () => loadDisc(true));
+  $("#discSearch").addEventListener("input", discs);
+  $("#discMore").addEventListener("click", () => { discAll = !discAll; discs(); });
   $("#newsList").addEventListener("click", async (e) => {
     const id = e.target.dataset && e.target.dataset.hide; if (!id) return;
     if (!confirm("이 기사를 아카이브에서 숨길까요? (다시 수집되지 않습니다)")) return;
@@ -321,7 +350,7 @@
     s += `<path d="${p} L${x(data.length - 1)},${H - B} L${L},${H - B}Z" fill="#0f7b8a" opacity=".08"/><path d="${p}" fill="none" stroke="#0f7b8a" stroke-width="2"/>`;
     [0, Math.floor(data.length / 2), data.length - 1].forEach((i) => { const d = data[i].d; s += `<text x="${x(i)}" y="${H - 6}" text-anchor="${i ? (i === data.length - 1 ? "end" : "middle") : "start"}" font-size="10" fill="#8a93a3">${d.slice(2, 4)}.${d.slice(4, 6)}.${d.slice(6)}</text>`; });
     // 누적 기록 중 미팅·공시 날짜를 차트에 점으로
-    const marks = [...D.LOG, ...WEBLOG].filter((l) => l.type === "미팅" || l.type === "공시");
+    const marks = [...D.LOG, ...WEBLOG].filter((l) => l.type === "미팅" || l.type === "공시").concat(DISC.map((x) => ({ date: x.date, type: "공시", title: x.title })));
     marks.forEach((m) => {
       const key = m.date.replace(/-/g, ""); const i = data.findIndex((d) => d.d >= key);
       if (i >= 0) s += `<circle cx="${x(i)}" cy="${y(data[i].c)}" r="4" fill="${m.type === "미팅" ? "#d27a12" : "#2f6fd6"}" stroke="#fff" stroke-width="1.5"><title>${m.date} ${esc(m.title)}</title></circle>`;
@@ -398,7 +427,7 @@
   ["cPrice", "cShares", "cEquity", "cGain", "cDisc", "cSales"].forEach((id) => $("#" + id).addEventListener("input", calc));
   $("#rangeSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; $$("#rangeSeg button").forEach((x) => x.classList.toggle("on", x === b)); drawChart(+b.dataset.d); });
   calc(); peers(); drawChart(180); drawPBRBand();
-  loadWebLog(); loadLiveNews(); loadFeed();
+  loadWebLog(); loadLiveNews(); loadFeed(); loadDisc();
   // 시세는 순서대로: 현재가로 토큰을 먼저 확보한 뒤 나머지 (토큰 발급 1분 1회 제한 대응)
   (async () => { await loadPrice(); await loadDaily(); await loadInvestor(); await loadPeers(); })();
   setInterval(() => { const h = (new Date().getUTCHours() + 9) % 24; if (h >= 9 && h < 16) loadPrice(); }, 60000);

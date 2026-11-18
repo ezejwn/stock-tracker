@@ -43,6 +43,7 @@
     await step("수급", async () => { (await getJSON(API + "stock?type=investor")).data.forEach((r) => (W.inv[r.d] = r)); });
     await step("뉴스", async () => { W.news = (await getJSON(API + "news?display=100&query=" + encodeURIComponent(D.META.name))).data; });
     await step("기록", async () => { W.notes = (await getJSON(API + "notes")).data || []; });
+    await step("공시", async () => { W.notes = W.notes.concat(((await getJSON(API + "disclosures")).data || []).map((x) => ({ date: x.date, type: "공시", title: x.title, src: "dis" }))); });
     renderWhy();
   }
 
