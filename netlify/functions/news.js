@@ -1,11 +1,11 @@
 // 뉴스 검색 — 실시간 뉴스 칸, '왜 움직였나' 패널, 주변 시장 이슈에서 사용
 //   /.netlify/functions/news?query=아이씨에이치&display=20
-// 1순위: 네이버 뉴스 검색 API (NAVER_CLIENT_ID / NAVER_CLIENT_SECRET)
+// 1순위: 네이버 뉴스 검색 API (NAVER_CLIENT_ID / NAVER_CLIENT_SECRET — NAVER API HUB 키·예전 개발자센터 키 모두 지원)
 // 키가 없거나 인증이 실패하면 키 없이 되는 경로로 대신 응답:
 //   - 아이씨에이치 검색어 → 자동 수집 아카이브(네이버 증권 종목뉴스) + 네이버 증권 최신분
 //   - 그 밖의 검색어   → Google 뉴스 RSS (한국어)
 
-const { naverKeys, getStore, readArchive, collect } = require("../lib/newsfeed");
+const { naverNewsSearch, getStore, readArchive, collect } = require("../lib/newsfeed");
 const doFetch = (...a) => (typeof fetch === "function" ? fetch(...a) : require("node-fetch")(...a));
 
 const strip = (s) =>
@@ -27,13 +27,7 @@ const res = (body, status = 200) => ({
 });
 
 async function naverSearch(query, display) {
-  const { ID, SECRET } = naverKeys();
-  if (!ID || !SECRET) throw new Error("네이버 검색 키 없음");
-  const r = await doFetch(`https://openapi.naver.com/v1/search/news.json?${new URLSearchParams({ query, display, sort: "date" })}`, {
-    headers: { "X-Naver-Client-Id": ID, "X-Naver-Client-Secret": SECRET },
-  });
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.errorMessage || r.status);
+  const j = await naverNewsSearch(query, display);
   return (j.items || []).map((it) => {
     const d = new Date(it.pubDate);
     return { title: strip(it.title), desc: strip(it.description), link: it.link, origin: it.originallink || it.link, date: isNaN(d) ? "" : kst(d) };

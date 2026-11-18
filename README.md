@@ -71,6 +71,9 @@
 - 관련 없는 기사는 관리 토큰이 있는 브라우저에서 **숨김**을 누르면 빠지고, 다시 수집되지 않습니다.
 - 예약 실행에서 Blobs 연결 오류가 나면 환경변수 `BLOBS_SITE_ID`(사이트 ID)와 `BLOBS_TOKEN`(개인 액세스 토큰)을 넣으세요.
 
+## 네이버 검색 키
+네이버 검색 API는 네이버 클라우드의 **NAVER API HUB**로 옮겨졌습니다. 콘솔 → AI·NAVER API(NAVER API HUB) → Application에서 **뉴스**를 고른 앱의 인증 정보(Client ID 10자, Client Secret 40자)를 `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`에 넣으면 됩니다. 예전 개발자센터 키(20자/10자)도 그대로 동작합니다. 점검: `/.netlify/functions/newsfeed?diag=1`
+
 ## 직접 기록 추가 (미팅·새 정보)
 - 오른쪽 아래 **＋ 기록** 버튼 → 09 누적 기록의 추가 폼이 열립니다. `NOTE_ADMIN_TOKEN` 값을 한 번 입력하면 그 브라우저에 기억됩니다.
 - '확인할 것' 질문을 고르고 상태(일부/확인)를 정하면 10번 표의 상태와 '들은 내용'에 함께 반영됩니다.

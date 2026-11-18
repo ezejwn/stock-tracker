@@ -72,6 +72,30 @@ async function fromNaverStock(pages = 2) {
 const cleanKey = (v) => String(v || "").replace(/^\s*[A-Z_]+\s*=\s*/, "").trim().replace(/^["'`]+|["'`]+$/g, "").replace(/\s+/g, "");
 const naverKeys = () => ({ ID: cleanKey(process.env.NAVER_CLIENT_ID), SECRET: cleanKey(process.env.NAVER_CLIENT_SECRET) });
 
+
+// 네이버 뉴스 검색 호출 — 두 방식 모두 지원
+//   NAVER API HUB(네이버 클라우드, ID 10자·Secret 40자): naverapihub.apigw.ntruss.com/search/v1/news
+//   예전 개발자센터(ID 20자·Secret 10자):              openapi.naver.com/v1/search/news.json
+// 키 모양으로 먼저 시도할 쪽을 고르고, 인증이 실패하면 다른 쪽으로 한 번 더 시도
+const HUB = { name: "NAVER API HUB", url: (p) => `https://naverapihub.apigw.ntruss.com/search/v1/news?${p}`, headers: (i, s) => ({ "X-NCP-APIGW-API-KEY-ID": i, "X-NCP-APIGW-API-KEY": s }) };
+const DEV = { name: "개발자센터", url: (p) => `https://openapi.naver.com/v1/search/news.json?${p}`, headers: (i, s) => ({ "X-Naver-Client-Id": i, "X-Naver-Client-Secret": s }) };
+async function naverNewsSearch(query, display = 20, sort = "date") {
+  const { ID, SECRET } = naverKeys();
+  if (!ID || !SECRET) throw new Error("네이버 검색 키 없음");
+  const order = SECRET.length >= 30 || ID.length <= 12 ? [HUB, DEV] : [DEV, HUB];
+  const params = new URLSearchParams({ query, display, sort });
+  const errs = [];
+  for (const api of order) {
+    const r = await doFetch(api.url(params), { headers: api.headers(ID, SECRET) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) return { items: j.items || [], via: api.name };
+    const msg = (j.error && (j.error.message || j.error.errorCode)) || j.errorMessage || j.message || "";
+    errs.push(`${api.name} ${r.status}${msg ? " " + msg : ""}`);
+    if (r.status !== 401 && r.status !== 403) break; // 인증 문제일 때만 다른 방식 시도
+  }
+  throw new Error(errs.join(" / "));
+}
+
 // 키 값은 보여주지 않고 형식만 점검
 async function diagnoseKeys() {
   const rawId = process.env.NAVER_CLIENT_ID, rawSec = process.env.NAVER_CLIENT_SECRET;
@@ -82,13 +106,12 @@ async function diagnoseKeys() {
     ...(showEnds ? { 앞2자: clean.slice(0, 2), 뒤2자: clean.slice(-2) } : {}),
   };
   const out = { NAVER_CLIENT_ID: desc(rawId, ID, true), NAVER_CLIENT_SECRET: desc(rawSec, SECRET, false),
-    참고: "정상 키는 보통 Client ID 20자, Client Secret 10자입니다. 길이가 반대면 둘이 바뀐 것입니다." };
+    참고: "NAVER API HUB 키는 ID 10자·Secret 40자, 예전 개발자센터 키는 ID 20자·Secret 10자입니다. 둘 다 지원합니다." };
   if (ID && SECRET) {
     try {
-      const r = await doFetch("https://openapi.naver.com/v1/search/news.json?query=%EC%95%84%EC%9D%B4%EC%94%A8%EC%97%90%EC%9D%B4%EC%B9%98&display=1", { headers: { "X-Naver-Client-Id": ID, "X-Naver-Client-Secret": SECRET } });
-      const j = await r.json().catch(() => ({}));
-      out.네이버응답 = r.ok ? "정상 (키 동작함)" : `${r.status} ${j.errorCode || ""} ${j.errorMessage || ""}`.trim();
-    } catch (e) { out.네이버응답 = "호출 실패: " + (e.message || e); }
+      const r = await naverNewsSearch("아이씨에이치", 1);
+      out.네이버응답 = `정상 (키 동작함, ${r.via} 방식)`;
+    } catch (e) { out.네이버응답 = String(e.message || e); }
   }
   return out;
 }
@@ -97,11 +120,7 @@ async function diagnoseKeys() {
 async function fromNaverSearch() {
   const { ID, SECRET } = naverKeys();
   if (!ID || !SECRET) return [];
-  const r = await doFetch(`https://openapi.naver.com/v1/search/news.json?${new URLSearchParams({ query: "아이씨에이치", display: 50, sort: "date" })}`, {
-    headers: { "X-Naver-Client-Id": ID, "X-Naver-Client-Secret": SECRET },
-  });
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.errorMessage || "검색 API " + r.status);
+  const j = await naverNewsSearch("아이씨에이치", 50);
   return (j.items || [])
     .map((it) => {
       const d = new Date(it.pubDate);
@@ -159,4 +178,4 @@ async function collect(store) {
   return { added, errors, total: arc.items.length, lastRun: now };
 }
 
-module.exports = { getStore, readArchive, collect, naverKeys, diagnoseKeys };
+module.exports = { getStore, readArchive, collect, naverKeys, diagnoseKeys, naverNewsSearch };
