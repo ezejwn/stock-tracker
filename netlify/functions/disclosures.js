@@ -19,6 +19,8 @@ exports.handler = async function (event) {
       run = await Promise.race([collect(store), new Promise((r) => setTimeout(() => r({ pending: true }), 8500))]);
     }
   } catch (e) { run = { error: String(e.message || e) }; }
-  const a = await readArchive(store);
+  // 방금 수집했으면 저장소를 다시 읽지 않고 그 결과로 응답 (저장 직후 읽기가 늦게 반영될 수 있음)
+  const a = run && run._arc ? run._arc : await readArchive(store);
+  if (run) delete run._arc;
   return res({ ok: true, lastRun: a.lastRun, lastError: a.lastError, sources: a.sources, dartKey: !!dartKey(), total: a.items.length, run, data: a.items });
 };

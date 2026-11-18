@@ -23,7 +23,7 @@ const dartKey = () => String(process.env.DART_API_KEY || "").trim().replace(/^["
 function getStore(event) {
   const blobs = require("@netlify/blobs");
   if (event && blobs.connectLambda) { try { blobs.connectLambda(event); } catch (e) { /* 예약 실행 */ } }
-  const opts = { name: "ich-dart", consistency: "strong" };
+  const opts = { name: "ich-dart" };
   if (process.env.BLOBS_SITE_ID && process.env.BLOBS_TOKEN) { opts.siteID = process.env.BLOBS_SITE_ID; opts.token = process.env.BLOBS_TOKEN; }
   return blobs.getStore(opts);
 }
@@ -145,7 +145,7 @@ async function collect(store) {
   arc.items = arc.items.slice(0, 3000);
   arc.lastRun = now; arc.lastError = errors.join(" / "); arc.sources = used;
   await store.setJSON("archive", arc);
-  return { added, errors, total: arc.items.length, sources: used };
+  return { added, errors, total: arc.items.length, sources: used, _arc: arc };
 }
 
 module.exports = { getStore, readArchive, collect, dartKey };

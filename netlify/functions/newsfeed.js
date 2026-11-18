@@ -41,6 +41,7 @@ exports.handler = async function (event) {
   } catch (e) {
     run = { error: String(e.message || e) };
   }
-  const arc = await readArchive(store);
+  const arc = run && run._arc ? run._arc : await readArchive(store);
+  if (run) delete run._arc;
   return res({ ok: true, lastRun: arc.lastRun, lastError: arc.lastError, total: arc.items.length, run, data: arc.items });
 };
