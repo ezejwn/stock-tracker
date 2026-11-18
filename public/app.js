@@ -255,7 +255,7 @@
       DISC = j.data || [];
       const t = j.lastRun ? new Date(j.lastRun).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "–";
       const add = j.run && j.run.added ? ` · 방금 ${j.run.added}건 추가` : "";
-      $("#discInfo").textContent = `${(j.sources || []).join("·") || "자동"} 수집 · 30분마다 · 마지막 확인 ${t}${add}` + (!j.dartKey ? " · DART 키 미설정(네이버 증권 최근분만)" : "") + (j.lastError ? ` · 일부 오류: ${j.lastError}` : "");
+      $("#discInfo").textContent = `${(j.sources || []).join("·") || "DART"} 자동 수집 · 30분마다 · 마지막 확인 ${t}${add}` + (!j.dartKey ? " · DART 키 미설정(네이버 증권 최근분만)" : "") + (j.lastError ? ` · 일부 오류: ${j.lastError}` : "");
       discs(); header(); if (DAILY.length) drawChart(+$("#rangeSeg .on").dataset.d);
     } catch (e) {
       $("#discInfo").textContent = "공시 수집 API 미연결 — 배포 후 동작합니다.";

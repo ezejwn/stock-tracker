@@ -31,7 +31,7 @@ function getStore(event) {
   if (event && blobs.connectLambda) {
     try { blobs.connectLambda(event); } catch (e) { /* 예약 실행 등 컨텍스트 없는 경우 */ }
   }
-  const opts = { name: "ich-news" };
+  const opts = { name: "ich-news", consistency: "strong" };
   if (process.env.BLOBS_SITE_ID && process.env.BLOBS_TOKEN) {
     opts.siteID = process.env.BLOBS_SITE_ID;
     opts.token = process.env.BLOBS_TOKEN;

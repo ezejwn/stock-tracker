@@ -1,6 +1,6 @@
 // 아이씨에이치 공시 자동 수집 — 공용 로직
 //   1) OpenDART 공시검색 (DART_API_KEY 있을 때, 공식·전체 이력)
-//   2) 네이버 증권 '공시' 탭 (키 불필요, 최근분)
+//   2) 네이버 증권 '공시' 탭 (DART 키가 없을 때만, 현재 폐쇄 상태)
 // Netlify Blobs "ich-dart" 저장소의 "archive" 키에 중복 없이 누적합니다.
 
 const zlib = require("zlib");
@@ -23,7 +23,7 @@ const dartKey = () => String(process.env.DART_API_KEY || "").trim().replace(/^["
 function getStore(event) {
   const blobs = require("@netlify/blobs");
   if (event && blobs.connectLambda) { try { blobs.connectLambda(event); } catch (e) { /* 예약 실행 */ } }
-  const opts = { name: "ich-dart" };
+  const opts = { name: "ich-dart", consistency: "strong" };
   if (process.env.BLOBS_SITE_ID && process.env.BLOBS_TOKEN) { opts.siteID = process.env.BLOBS_SITE_ID; opts.token = process.env.BLOBS_TOKEN; }
   return blobs.getStore(opts);
 }
@@ -120,7 +120,8 @@ async function collect(store) {
   const errors = [], used = [];
   let fresh = [];
   try { const d = await fromDart(arc); if (d) { fresh = fresh.concat(d); used.push("DART"); } } catch (e) { errors.push("DART: " + (e.message || e)); }
-  try { fresh = fresh.concat(await fromNaver(1)); used.push("네이버 증권"); } catch (e) { errors.push("네이버: " + (e.message || e)); }
+  // 네이버 증권 공시 탭은 2026.11 기준 폐쇄(410) — DART 키가 없을 때만 시도
+  if (!dartKey()) { try { fresh = fresh.concat(await fromNaver(1)); used.push("네이버 증권"); } catch (e) { errors.push("DART 키 없음, 네이버 공시 탭도 응답 없음(" + (e.message || e) + ")"); } }
 
   const ids = new Set(arc.items.map((x) => x.id));
   const keyOf = (x) => x.date + "|" + normTitle(x.title);
