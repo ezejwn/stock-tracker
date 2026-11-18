@@ -68,7 +68,7 @@
     $("#qTbl").innerHTML = "<thead><tr><th>분기</th><th class='n'>매출</th><th class='n'>영업이익</th><th class='n'>영업이익률</th><th>비고</th></tr></thead><tbody>" +
       D.QUARTERS.map((r) => {
         const m = r.op != null ? (r.op / r.s) * 100 : null;
-        return `<tr${r.guide ? ' style="background:#fffaf0"' : ""}><td>${r.q}${r.guide ? " (가이던스)" : ""}</td><td class="n">${fmt(r.s, r.s % 1 ? 1 : 0)}</td><td class="n ${signCls(r.op)}">${r.op == null ? "–" : fmt(r.op)}</td><td class="n">${m == null ? "–" : fmt(m, 1) + "%"}</td><td class="small">${esc(r.src)} ${r.guide ? tag("hear") : r.est ? tag("est") : ""}</td></tr>`;
+        return `<tr${r.guide ? ' style="background:#fffaf0"' : ""}><td>${r.q}${r.guide ? " (가이던스)" : ""}</td><td class="n">${fmt(r.s, r.s % 1 ? 1 : 0)}</td><td class="n ${signCls(r.op)}">${r.op == null ? "–" : fmt(r.op, r.op % 1 ? 1 : 0)}</td><td class="n">${m == null ? "–" : fmt(m, 1) + "%"}</td><td class="small">${r.rcept ? `<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${r.rcept}" target="_blank" rel="noopener">${esc(r.src)}</a>` : esc(r.src)} ${r.dart ? tag("dis") : r.guide ? tag("hear") : r.est ? tag("est") : ""}</td></tr>`;
       }).join("") + "</tbody>";
 
     let b = "<thead><tr><th>항목</th>" + D.BS.cols.map((c) => `<th class="n">${c}</th>`).join("") + "</tr></thead><tbody>";
@@ -77,6 +77,52 @@
 
     $("#guideTbl").innerHTML = "<thead><tr><th>시점</th><th>내용</th></tr></thead><tbody>" + D.GUIDANCE.map(([d, t, s]) => `<tr><td class="n" style="text-align:left">${d}</td><td>${esc(t)} ${tag(s)}</td></tr>`).join("") + "</tbody>";
     qbars();
+  }
+  // DART 재무제표 자동 반영 (분기·반기·사업보고서) — 데이터 파일 값 위에 덮어씀
+  async function loadFin() {
+    try {
+      const j = await fetch("/.netlify/functions/financials").then((r) => r.json());
+      if (!j.ok) { $("#finInfo").textContent = j.error ? "DART 재무 자동 반영 안 됨 — " + j.error : ""; return; }
+      const qOrder = (q) => { const m = q.match(/^(\d)Q(\d\d)$/); return m ? +m[2] * 10 + +m[1] : 0; };
+      (j.quarters || []).forEach((x) => {
+        const row = { q: x.q, s: x.s, op: x.op, src: x.derived ? "DART 사업보고서 − 3분기 누적" : "DART 분기보고서", dart: true, rcept: x.rcept };
+        const i = D.QUARTERS.findIndex((r) => r.q === x.q);
+        if (i >= 0) D.QUARTERS[i] = row; else D.QUARTERS.push(row);
+      });
+      D.QUARTERS.sort((a, b) => qOrder(a.q) - qOrder(b.q));
+      const A = D.ANNUAL;
+      (j.annual || []).forEach((x) => {
+        let i = A.years.indexOf(x.year);
+        if (i < 0) { A.years.push(x.year); i = A.years.length - 1; }
+        A.sales[i] = x.sales; A.op[i] = x.op; A.ni[i] = x.ni; A.ocf[i] = x.ocf;
+      });
+      const map = { "자산총계": "assets", "유동자산": "curAssets", "현금성자산": "cash", "재고자산": "inv", "유형자산": "ppe", "부채총계": "liab", "유동부채": "curLiab", "총차입금(CB 포함)": "debt", "자본총계": "equity" };
+      (j.bs || []).forEach((x) => {
+        const ck = (c) => (c.length === 4 ? c + ".12" : c);
+        let i = D.BS.cols.indexOf(x.col);
+        if (i < 0) {
+          // 지금 표의 마지막 시점보다 새로운 것만 열을 추가 (지난 분기 열은 늘리지 않음)
+          if (ck(x.col) <= ck(D.BS.cols[D.BS.cols.length - 1])) return;
+          D.BS.cols.push(x.col); i = D.BS.cols.length - 1;
+        }
+        D.BS.rows.forEach((r) => {
+          const k = map[r[0]];
+          if (k) r[1][i] = x[k];
+          else if (r[0] === "부채비율") r[1][i] = x.equity ? Math.round((x.liab / x.equity) * 100) : null;
+          else if (r[0] === "유동비율") r[1][i] = x.curLiab ? Math.round((x.curAssets / x.curLiab) * 100) : null;
+        });
+      });
+      const last = (j.bs || []).slice(-1)[0];
+      if (last && last.equity) {
+        D.META.equity = last.equity; D.META.equityAsOf = last.col;
+        if ($("#cEquity")) $("#cEquity").value = last.equity;
+      }
+      const real = D.QUARTERS.filter((r) => !r.guide).slice(-4);
+      if (real.length === 4) { D.META.ttmSales = Math.round(real.reduce((s, r) => s + r.s, 0)); if ($("#cSales")) $("#cSales").value = D.META.ttmSales; }
+      const lq = (j.quarters || []).slice(-1)[0];
+      $("#finInfo").innerHTML = lq ? `DART 재무제표 자동 반영 · 최신 <b>${lq.q}</b>${lq.rcept ? ` (<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${lq.rcept}" target="_blank" rel="noopener">원문</a>)` : ""} · 새 분기·사업보고서가 나오면 30분 안에 바뀝니다` + (j.lastError ? ` · 일부 오류: ${esc(j.lastError)}` : "") : "DART 재무제표 확인 중 — 잠시 뒤 새로고침하면 반영됩니다";
+      finance(); header(); if (typeof calc === "function") calc();
+    } catch (e) { /* API 미연결 시 데이터 파일 값 그대로 */ }
   }
   function qbars() {
     const Q = D.QUARTERS, W = 900, H = 300, L = 50, R = 20, T = 28, B = 40;
@@ -427,7 +473,7 @@
   ["cPrice", "cShares", "cEquity", "cGain", "cDisc", "cSales"].forEach((id) => $("#" + id).addEventListener("input", calc));
   $("#rangeSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; $$("#rangeSeg button").forEach((x) => x.classList.toggle("on", x === b)); drawChart(+b.dataset.d); });
   calc(); peers(); drawChart(180); drawPBRBand();
-  loadWebLog(); loadLiveNews(); loadFeed(); loadDisc();
+  loadWebLog(); loadLiveNews(); loadFeed(); loadDisc(); loadFin();
   // 시세는 순서대로: 현재가로 토큰을 먼저 확보한 뒤 나머지 (토큰 발급 1분 1회 제한 대응)
   (async () => { await loadPrice(); await loadDaily(); await loadInvestor(); await loadPeers(); })();
   setInterval(() => { const h = (new Date().getUTCHours() + 9) % 24; if (h >= 9 && h < 16) loadPrice(); }, 60000);

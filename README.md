@@ -76,6 +76,11 @@
 - **OpenDART 키**(`DART_API_KEY`, opendart.fss.or.kr에서 무료 발급, 40자)를 넣으면 상장 이후 전체 공시 이력과 DART 원문 링크를 가져옵니다. 키가 없으면 네이버 증권 '공시' 탭의 최근분만 모읍니다.
 - 고유번호는 키로 자동 조회합니다. 필요하면 `DART_CORP_CODE`(8자리)로 직접 지정할 수 있습니다.
 
+## 실적 자동 반영 (DART 재무제표)
+- `financials` 함수가 OpenDART 전체 재무제표(연결 우선)에서 2025년 이후 분기·반기·사업보고서의 매출·영업이익·순이익·재무상태를 가져와 06 실적 표·막대그래프·밸류 계산에 덮어씁니다. 4분기는 사업보고서 − 3분기 누적으로 계산합니다.
+- 30분마다 아직 없는 보고서를 확인합니다(제출 전이면 6시간 간격). `DART_API_KEY`가 필요합니다.
+- 차입금은 재무상태표의 '차입금'·'사채' 계정 합계라 데이터 파일 값과 조금 다를 수 있습니다.
+
 ## 네이버 검색 키
 네이버 검색 API는 네이버 클라우드의 **NAVER API HUB**로 옮겨졌습니다. 콘솔 → AI·NAVER API(NAVER API HUB) → Application에서 **뉴스**를 고른 앱의 인증 정보(Client ID 10자, Client Secret 40자)를 `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`에 넣으면 됩니다. 예전 개발자센터 키(20자/10자)도 그대로 동작합니다. 점검: `/.netlify/functions/newsfeed?diag=1`
 
