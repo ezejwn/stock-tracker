@@ -13,7 +13,7 @@ exports.handler = async function (event) {
   const q = event.queryStringParameters || {};
   let fin = null, run = null;
   try {
-    run = await Promise.race([F.collect(store, { maxCalls: 1, deadline: Date.now() + 1000, force: q.refresh === "1", timeout: 7500 }), new Promise((r) => setTimeout(() => r({ pending: true }), 9000))]);
+    run = await Promise.race([F.collect(store, { maxCalls: 1, deadline: Date.now() + 1000, force: q.refresh === "1", timeout: 7500, event }), new Promise((r) => setTimeout(() => r({ pending: true }), 9000))]);
     if (run && run._fin) { fin = run._fin; delete run._fin; }
   } catch (e) { run = { error: String(e.message || e) }; }
   if (!fin) fin = await F.read(store);

@@ -9,7 +9,7 @@ exports.handler = async function (event) {
   const out = {};
   try { out.news = await news.collect(news.getStore(event)); } catch (e) { out.news = { error: String(e.message || e) }; }
   try { out.disclosures = await dart.collect(dart.getStore(event)); } catch (e) { out.disclosures = { error: String(e.message || e) }; }
-  try { out.financials = await fin.collect(fin.getStore(event), { maxCalls: 3, deadline: Date.now() + 8000, timeout: 12000 }); } catch (e) { out.financials = { error: String(e.message || e) }; }
+  try { out.financials = await fin.collect(fin.getStore(event), { maxCalls: 3, deadline: Date.now() + 8000, timeout: 12000, event }); } catch (e) { out.financials = { error: String(e.message || e) }; }
   for (const k in out) { delete out[k]._arc; delete out[k]._fin; }
   console.log("news-collect", JSON.stringify(out));
   return { statusCode: 200, body: JSON.stringify(out) };

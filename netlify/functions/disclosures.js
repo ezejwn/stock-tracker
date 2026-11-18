@@ -16,7 +16,7 @@ exports.handler = async function (event) {
     const a0 = await readArchive(store);
     if (q.refresh === "1" || !a0.lastRun || Date.now() - new Date(a0.lastRun).getTime() > 20 * 60e3) {
       // 화면 요청은 8.5초 안에 응답 (넘으면 수집은 예약 실행에 맡김)
-      run = await Promise.race([collect(store), new Promise((r) => setTimeout(() => r({ pending: true }), 8500))]);
+      run = await Promise.race([collect(store, { allowLookup: false }), new Promise((r) => setTimeout(() => r({ pending: true }), 8500))]);
     }
   } catch (e) { run = { error: String(e.message || e) }; }
   // 방금 수집했으면 저장소를 다시 읽지 않고 그 결과로 응답 (저장 직후 읽기가 늦게 반영될 수 있음)

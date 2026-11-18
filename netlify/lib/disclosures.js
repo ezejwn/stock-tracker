@@ -4,8 +4,10 @@
 // Netlify Blobs "ich-dart" 저장소의 "archive" 키에 중복 없이 누적합니다.
 
 const zlib = require("zlib");
+// ---- 회사별 설정 ----
 const STOCK = process.env.NEWS_STOCK_CODE || "368600";
 const LISTED = "20220701"; // 상장(2022.07) 무렵부터 이력 수집
+const STORE = "ich-dart";
 
 const KNOWN_CORP = { "368600": "01302853" }; // 아이씨에이치 DART 고유번호 (corpCode.xml 내려받기 생략)
 // 외부 호출마다 시간 제한 — Netlify 함수 제한 시간(동기 10초)을 넘지 않도록
@@ -23,7 +25,7 @@ const dartKey = () => String(process.env.DART_API_KEY || "").trim().replace(/^["
 function getStore(event) {
   const blobs = require("@netlify/blobs");
   if (event && blobs.connectLambda) { try { blobs.connectLambda(event); } catch (e) { /* 예약 실행 */ } }
-  const opts = { name: "ich-dart" };
+  const opts = { name: STORE };
   if (process.env.BLOBS_SITE_ID && process.env.BLOBS_TOKEN) { opts.siteID = process.env.BLOBS_SITE_ID; opts.token = process.env.BLOBS_TOKEN; }
   return blobs.getStore(opts);
 }
@@ -45,10 +47,12 @@ function unzipFirst(buf) {
 }
 
 // 종목코드 → DART 고유번호(corp_code)
-async function corpCode(arc) {
+// 화면 요청(10초 제한)에서는 수 MB짜리 corpCode.xml을 받지 않고, 예약 실행(30초)에서만 조회해 저장
+async function corpCode(arc, allowLookup = true) {
   if (process.env.DART_CORP_CODE) return process.env.DART_CORP_CODE.trim();
   if (arc.corpCode) return arc.corpCode;
   if (KNOWN_CORP[STOCK]) return KNOWN_CORP[STOCK];
+  if (!allowLookup) throw new Error("DART 고유번호 확인 대기 — 다음 자동 실행(30분 이내)에서 조회");
   const r = await doFetch(`https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key=${encodeURIComponent(dartKey())}`, {}, 20000);
   const buf = Buffer.from(await r.arrayBuffer());
   if (buf[0] !== 0x50) { const t = buf.toString("utf8"); throw new Error("DART 고유번호 조회 실패: " + (strip((t.match(/<message>([^<]*)/) || [])[1]) || r.status)); }
@@ -60,10 +64,10 @@ async function corpCode(arc) {
 }
 
 // 1) OpenDART
-async function fromDart(arc) {
+async function fromDart(arc, allowLookup) {
   const key = dartKey();
   if (!key) return null;
-  const code = await corpCode(arc);
+  const code = await corpCode(arc, allowLookup);
   arc.corpCode = code;
   const end = ymd(new Date());
   const bgn = arc.backfilled ? ymd(new Date(Date.now() - 60 * 86400e3)) : LISTED;
@@ -113,13 +117,13 @@ async function fromNaver(pages = 2) {
   return out;
 }
 
-async function collect(store) {
+async function collect(store, { allowLookup = true } = {}) {
   const arc = await readArchive(store);
   const firstRun = !arc.items.length;
   const dartBackfill = !arc.backfilled && !!dartKey();
   const errors = [], used = [];
   let fresh = [];
-  try { const d = await fromDart(arc); if (d) { fresh = fresh.concat(d); used.push("DART"); } } catch (e) { errors.push("DART: " + (e.message || e)); }
+  try { const d = await fromDart(arc, allowLookup); if (d) { fresh = fresh.concat(d); used.push("DART"); } } catch (e) { errors.push("DART: " + (e.message || e)); }
   // 네이버 증권 공시 탭은 2026.11 기준 폐쇄(410) — DART 키가 없을 때만 시도
   if (!dartKey()) { try { fresh = fresh.concat(await fromNaver(1)); used.push("네이버 증권"); } catch (e) { errors.push("DART 키 없음, 네이버 공시 탭도 응답 없음(" + (e.message || e) + ")"); } }
 
@@ -148,4 +152,12 @@ async function collect(store) {
   return { added, errors, total: arc.items.length, sources: used, _arc: arc };
 }
 
-module.exports = { getStore, readArchive, collect, dartKey };
+// 다른 모듈(재무제표)에서 쓰는 고유번호: 설정·저장값·알려진 값만 (내려받기 없음)
+async function knownCorp(event) {
+  if (process.env.DART_CORP_CODE) return process.env.DART_CORP_CODE.trim();
+  if (KNOWN_CORP[STOCK]) return KNOWN_CORP[STOCK];
+  const a = await readArchive(getStore(event));
+  return a.corpCode || "";
+}
+
+module.exports = { getStore, readArchive, collect, dartKey, knownCorp };
