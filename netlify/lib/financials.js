@@ -36,9 +36,9 @@ function pick(list, sjs, k) {
   return rows.find((r) => idRe.test(r.account_id || "")) || rows.find((r) => nmRe.test(String(r.account_nm || "").replace(/\s/g, "")));
 }
 
-async function fetchReport(year, reprt) {
+async function fetchReport(year, reprt, ms = 8000) {
   for (const fs of ["CFS", "OFS"]) {
-    const r = await doFetch(`https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json?${new URLSearchParams({ crtfc_key: key(), corp_code: CORP, bsns_year: year, reprt_code: reprt, fs_div: fs })}`);
+    const r = await doFetch(`https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json?${new URLSearchParams({ crtfc_key: key(), corp_code: CORP, bsns_year: year, reprt_code: reprt, fs_div: fs })}`, ms);
     const j = await r.json();
     if (j.status === "013") continue; // 해당 없음
     if (j.status !== "000") throw new Error(`DART ${j.status} ${j.message || ""}`.trim());
@@ -94,7 +94,7 @@ async function read(store) {
 }
 
 // 아직 없는 보고서만 가져옴. 제출 전(013)이면 6시간 뒤 다시 확인. 한 번에 최대 maxCalls건
-async function collect(store, { maxCalls = 8, deadline = Date.now() + 25000, force = false } = {}) {
+async function collect(store, { maxCalls = 8, deadline = Date.now() + 25000, force = false, timeout = 12000 } = {}) {
   if (!key()) return { skipped: "DART_API_KEY 없음" };
   const fin = await read(store);
   const errors = []; let added = 0, calls = 0;
@@ -105,7 +105,7 @@ async function collect(store, { maxCalls = 8, deadline = Date.now() + 25000, for
     if (calls >= maxCalls || Date.now() > deadline) break;
     calls++;
     try {
-      const r = await fetchReport(id.slice(0, 4), id.slice(5));
+      const r = await fetchReport(id.slice(0, 4), id.slice(5), timeout);
       if (r) { fin.reports[id] = { ...r, fetchedAt: new Date().toISOString() }; await store.setJSON("rep-" + id, fin.reports[id]); added++; }
       else { fin.checked[id] = new Date().toISOString(); await store.set("chk-" + id, fin.checked[id]); }
     } catch (e) { errors.push(`${id}: ${e.message || e}`); }
