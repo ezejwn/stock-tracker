@@ -7,7 +7,11 @@ const CODE = process.env.NEWS_STOCK_CODE || "368600";
 const NAME_RE = /아이씨에이치|\bICH\b/i;
 const MAX_ITEMS = 3000;
 
-const doFetch = (...a) => (typeof fetch === "function" ? fetch(...a) : require("node-fetch")(...a));
+const doFetch = (url, opts = {}, ms = 7000) => {
+  const f = typeof fetch === "function" ? fetch : require("node-fetch");
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), ms);
+  return f(url, { ...opts, signal: ctl.signal }).catch((e) => { throw new Error(e.name === "AbortError" ? `시간 초과(${ms / 1000}초)` : e.message || String(e)); }).finally(() => clearTimeout(t));
+};
 const strip = (s) =>
   String(s || "")
     .replace(/<[^>]+>/g, "")

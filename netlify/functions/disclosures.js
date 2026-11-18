@@ -14,7 +14,10 @@ exports.handler = async function (event) {
   let run = null;
   try {
     const a0 = await readArchive(store);
-    if (q.refresh === "1" || !a0.lastRun || Date.now() - new Date(a0.lastRun).getTime() > 20 * 60e3) run = await collect(store);
+    if (q.refresh === "1" || !a0.lastRun || Date.now() - new Date(a0.lastRun).getTime() > 20 * 60e3) {
+      // 화면 요청은 8.5초 안에 응답 (넘으면 수집은 예약 실행에 맡김)
+      run = await Promise.race([collect(store), new Promise((r) => setTimeout(() => r({ pending: true }), 8500))]);
+    }
   } catch (e) { run = { error: String(e.message || e) }; }
   const a = await readArchive(store);
   return res({ ok: true, lastRun: a.lastRun, lastError: a.lastError, sources: a.sources, dartKey: !!dartKey(), total: a.items.length, run, data: a.items });

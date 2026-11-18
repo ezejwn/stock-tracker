@@ -7,7 +7,13 @@ const zlib = require("zlib");
 const STOCK = process.env.NEWS_STOCK_CODE || "368600";
 const LISTED = "20220701"; // 상장(2022.07) 무렵부터 이력 수집
 
-const doFetch = (...a) => (typeof fetch === "function" ? fetch(...a) : require("node-fetch")(...a));
+const KNOWN_CORP = { "368600": "01302853" }; // 아이씨에이치 DART 고유번호 (corpCode.xml 내려받기 생략)
+// 외부 호출마다 시간 제한 — Netlify 함수 제한 시간(동기 10초)을 넘지 않도록
+const doFetch = (url, opts = {}, ms = 7000) => {
+  const f = typeof fetch === "function" ? fetch : require("node-fetch");
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), ms);
+  return f(url, { ...opts, signal: ctl.signal }).catch((e) => { throw new Error(e.name === "AbortError" ? `시간 초과(${ms / 1000}초)` : e.message || String(e)); }).finally(() => clearTimeout(t));
+};
 const strip = (s) => String(s || "").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, " ").trim();
 const ymd = (d) => new Date(d.getTime() + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, "");
 const dash = (s) => `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
@@ -42,7 +48,8 @@ function unzipFirst(buf) {
 async function corpCode(arc) {
   if (process.env.DART_CORP_CODE) return process.env.DART_CORP_CODE.trim();
   if (arc.corpCode) return arc.corpCode;
-  const r = await doFetch(`https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key=${encodeURIComponent(dartKey())}`);
+  if (KNOWN_CORP[STOCK]) return KNOWN_CORP[STOCK];
+  const r = await doFetch(`https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key=${encodeURIComponent(dartKey())}`, {}, 20000);
   const buf = Buffer.from(await r.arrayBuffer());
   if (buf[0] !== 0x50) { const t = buf.toString("utf8"); throw new Error("DART 고유번호 조회 실패: " + (strip((t.match(/<message>([^<]*)/) || [])[1]) || r.status)); }
   const xml = unzipFirst(buf);
@@ -113,7 +120,7 @@ async function collect(store) {
   const errors = [], used = [];
   let fresh = [];
   try { const d = await fromDart(arc); if (d) { fresh = fresh.concat(d); used.push("DART"); } } catch (e) { errors.push("DART: " + (e.message || e)); }
-  try { fresh = fresh.concat(await fromNaver()); used.push("네이버 증권"); } catch (e) { errors.push("네이버: " + (e.message || e)); }
+  try { fresh = fresh.concat(await fromNaver(1)); used.push("네이버 증권"); } catch (e) { errors.push("네이버: " + (e.message || e)); }
 
   const ids = new Set(arc.items.map((x) => x.id));
   const keyOf = (x) => x.date + "|" + normTitle(x.title);
