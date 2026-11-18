@@ -81,33 +81,39 @@ const getStore = (event) => {
   return blobs.getStore(opts);
 };
 
+// 보고서마다 별도 키(rep-연도-코드)로 저장 — 동시에 여러 요청이 돌아도 서로 덮어쓰지 않음
 async function read(store) {
-  const a = (await store.get("fin", { type: "json" })) || {};
-  return { reports: a.reports || {}, lastRun: a.lastRun || "", lastError: a.lastError || "", checked: a.checked || {} };
+  const reports = {}, checked = {};
+  const { blobs } = await store.list();
+  await Promise.all(blobs.map(async ({ key: k }) => {
+    if (k.startsWith("rep-")) { const v = await store.get(k, { type: "json" }); if (v) reports[k.slice(4)] = v; }
+    else if (k.startsWith("chk-")) { checked[k.slice(4)] = await store.get(k); }
+  }));
+  const meta = (await store.get("meta", { type: "json" })) || {};
+  return { reports, checked, lastRun: meta.lastRun || "", lastError: meta.lastError || "" };
 }
 
 // 아직 없는 보고서만 가져옴. 제출 전(013)이면 6시간 뒤 다시 확인. 한 번에 최대 maxCalls건
-async function collect(store, { maxCalls = 8, deadline = Date.now() + 25000 } = {}) {
+async function collect(store, { maxCalls = 8, deadline = Date.now() + 25000, force = false } = {}) {
   if (!key()) return { skipped: "DART_API_KEY 없음" };
   const fin = await read(store);
   const errors = []; let added = 0, calls = 0;
   const now = Date.now();
-  for (const [y, code] of dueReports()) {
-    const id = `${y}-${code}`;
-    if (fin.reports[id]) continue;
-    if (fin.checked[id] && now - new Date(fin.checked[id]).getTime() < 6 * 3600e3) continue;
+  const todo = dueReports().map(([y, c]) => `${y}-${c}`).filter((id) => !fin.reports[id] && (force || !fin.checked[id] || now - new Date(fin.checked[id]).getTime() > 6 * 3600e3));
+  // 최신 보고서부터 확인 (새로 나온 분기보고서가 가장 먼저 반영되도록)
+  for (const id of todo.reverse()) {
     if (calls >= maxCalls || Date.now() > deadline) break;
     calls++;
     try {
-      const r = await fetchReport(y, code);
-      if (r) { fin.reports[id] = { ...r, fetchedAt: new Date().toISOString() }; added++; delete fin.checked[id]; }
-      else fin.checked[id] = new Date().toISOString();
+      const r = await fetchReport(id.slice(0, 4), id.slice(5));
+      if (r) { fin.reports[id] = { ...r, fetchedAt: new Date().toISOString() }; await store.setJSON("rep-" + id, fin.reports[id]); added++; }
+      else { fin.checked[id] = new Date().toISOString(); await store.set("chk-" + id, fin.checked[id]); }
     } catch (e) { errors.push(`${id}: ${e.message || e}`); }
   }
   fin.lastRun = new Date().toISOString();
   fin.lastError = errors.join(" / ");
-  await store.setJSON("fin", fin);
-  return { added, calls, errors, _fin: fin };
+  await store.setJSON("meta", { lastRun: fin.lastRun, lastError: fin.lastError });
+  return { added, calls, remaining: Math.max(0, todo.length - calls), errors, _fin: fin };
 }
 
 // 화면용으로 정리: 분기 손익, 연간, 재무상태 시점별
