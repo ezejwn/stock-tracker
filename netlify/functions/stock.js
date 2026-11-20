@@ -6,6 +6,7 @@
 //   /.netlify/functions/stock?type=index&codes=0001,1001   → 코스피·코스닥 지수
 //   /.netlify/functions/stock?type=indexdaily&icode=1001   → 지수 일봉
 //   /.netlify/functions/stock?type=multi&codes=005930,...  → 여러 종목 현재가
+//   /.netlify/functions/stock?type=flow                   → 수급 체크(체결강도·VI·업종·분봉 급변·투자자)
 // 환경변수: KIS_APPKEY, KIS_APPSECRET
 
 const BASE = process.env.KIS_BASE_URL || "https://openapi.koreainvestment.com:9443";
@@ -117,6 +118,7 @@ const tidyPrice = (o) => ({
   per: num(o.per), pbr: num(o.pbr), eps: num(o.eps), bps: num(o.bps),
   w52High: num(o.w52_hgpr), w52Low: num(o.w52_lwpr), shares: num(o.lstn_stcn), foreignRatio: num(o.hts_frgn_ehrt),
   sector: o.bstp_kor_isnm || null, market: o.rprs_mrkt_kor_name || null,
+  vi: o.vi_cls_code || null, // VI 적용 구분 (Y/N)
 });
 
 async function dailyChunk(event, code, from, to) {
@@ -175,6 +177,99 @@ async function multi(event, codes) {
   return out;
 }
 
+/* ===== 수급 체크 (장중 실시간) : 체결강도 · VI · 업종지수 · 분봉 급변 구간 · 투자자 ===== */
+const kstNow = () => new Date(Date.now() + 9 * 3600e3);
+const hms = (d) => d.toISOString().slice(11, 19).replace(/:/g, "");
+const normName = (s) => String(s || "").replace(/[^가-힣A-Za-z0-9]/g, "");
+
+async function ccnl(event, code) {
+  const j = await kis(event, "/uapi/domestic-stock/v1/quotations/inquire-ccnl", "FHKST01010300", {
+    FID_COND_MRKT_DIV_CODE: "J", FID_INPUT_ISCD: code,
+  });
+  const r = (j.output || [])[0];
+  if (!r) return null;
+  return { strength: num(r.tday_rltv), time: r.stck_cntg_hour || null, price: num(r.stck_prpr) };
+}
+async function viStatus(event, code, date) {
+  const j = await kis(event, "/uapi/domestic-stock/v1/quotations/inquire-vi-status", "FHPST01390000", {
+    FID_DIV_CLS_CODE: "0", FID_COND_SCR_DIV_CODE: "20139", FID_MRKT_CLS_CODE: "0", FID_INPUT_ISCD: code,
+    FID_RANK_SORT_CLS_CODE: "0", FID_INPUT_DATE_1: date, FID_TRGT_CLS_CODE: "", FID_TRGT_EXLS_CLS_CODE: "",
+  });
+  const KIND = { 1: "정적", 2: "동적", 3: "정적·동적" };
+  return (j.output || []).filter((r) => !r.mksc_shrn_iscd || r.mksc_shrn_iscd === code).map((r) => ({
+    date: r.bsop_date || date, on: r.cntg_vi_hour || null, off: r.vi_cncl_hour || null,
+    kind: KIND[String(r.vi_kind_code)] || r.vi_kind_code || null, cls: r.vi_cls_code || null,
+    price: num(r.vi_prc), base: num(r.vi_stnd_prc), dev: num(r.vi_dprt), count: num(r.vi_count),
+  })).sort((a, b) => String(a.on).localeCompare(String(b.on)));
+}
+// 시장(코스닥/코스피) 업종지수 전체 → 종목 업종명과 같은 것 찾기
+async function sectorIndex(event, sectorName, market) {
+  const kosdaq = !/코스피|KOSPI|유가/i.test(market || "");
+  const j = await kis(event, "/uapi/domestic-stock/v1/quotations/inquire-index-category-price", "FHPUP02140000", {
+    FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: kosdaq ? "1001" : "0001", FID_COND_SCR_DIV_CODE: "20214",
+    FID_MRKT_CLS_CODE: kosdaq ? "Q" : "K", FID_BLNG_CLS_CODE: "0",
+  });
+  const list = (j.output2 || []).map((r) => ({ code: r.bstp_cls_code, name: r.hts_kor_isnm, value: num(r.bstp_nmix_prpr), changeRate: num(r.bstp_nmix_prdy_ctrt) }));
+  const want = normName(sectorName);
+  if (!want) return { match: null, count: list.length };
+  const match = list.find((x) => normName(x.name) === want) || list.find((x) => normName(x.name).includes(want) || (normName(x.name) && want.includes(normName(x.name))));
+  return { match: match || null, count: list.length };
+}
+// 당일 1분봉 (30개씩 거꾸로)
+async function minutes(event, code, today) {
+  const now = kstNow();
+  let t = hms(now); if (t > "153000") t = "153000";
+  if (t < "090000") return [];
+  const bars = new Map();
+  for (let k = 0; k < 14 && t >= "090000"; k++) {
+    const j = await kis(event, "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice", "FHKST03010200", {
+      FID_ETC_CLS_CODE: "", FID_COND_MRKT_DIV_CODE: "J", FID_INPUT_ISCD: code, FID_INPUT_HOUR_1: t, FID_PW_DATA_INCU_YN: "N",
+    });
+    const rows = (j.output2 || []).filter((r) => r.stck_cntg_hour && (!r.stck_bsop_date || r.stck_bsop_date === today));
+    if (!rows.length) break;
+    rows.forEach((r) => bars.set(r.stck_cntg_hour, { t: r.stck_cntg_hour, c: num(r.stck_prpr), h: num(r.stck_hgpr), l: num(r.stck_lwpr), v: num(r.cntg_vol) }));
+    const first = rows.map((r) => r.stck_cntg_hour).sort()[0];
+    // 1분 전으로
+    const sec = +first.slice(0, 2) * 3600 + +first.slice(2, 4) * 60 + +first.slice(4, 6) - 60;
+    const nt = [Math.floor(sec / 3600), Math.floor((sec % 3600) / 60), sec % 60].map((x) => String(x).padStart(2, "0")).join("");
+    if (nt >= t) break; t = nt;
+    await sleep(60);
+  }
+  return [...bars.values()].sort((a, b) => a.t.localeCompare(b.t));
+}
+// 5분 동안 가장 크게 빠진/오른 구간
+function swing(bars) {
+  if (!bars.length) return null;
+  const total = bars.reduce((s, b) => s + (b.v || 0), 0);
+  let dn = null, up = null;
+  for (let i = 0; i < bars.length; i++) {
+    const a = bars[Math.max(0, i - 5)];
+    if (!a.c || i === 0) continue;
+    const chg = (bars[i].c / a.c - 1) * 100;
+    const vol = bars.slice(Math.max(0, i - 4), i + 1).reduce((s, b) => s + (b.v || 0), 0);
+    const w = { from: a.t, to: bars[i].t, chg, vol, share: total ? vol / total * 100 : null };
+    if (!dn || chg < dn.chg) dn = w;
+    if (!up || chg > up.chg) up = w;
+  }
+  const big = bars.reduce((m, b) => (!m || b.v > m.v ? b : m), null);
+  return { down: dn, up, peakMinute: big ? { t: big.t, v: big.v, share: total ? big.v / total * 100 : null } : null, total, last: bars[bars.length - 1].t };
+}
+async function flow(event, code) {
+  const out = { at: new Date().toISOString(), kst: hms(kstNow()), errors: [] };
+  const step = async (name, fn) => { try { await fn(); } catch (e) { out.errors.push(`${name}: ${e.message || e}`); } await sleep(60); };
+  const today = ymd(kstNow());
+  await step("현재가", async () => { out.price = tidyPrice(await price(event, code)); });
+  await step("투자자", async () => { const inv = await investor(event, code); out.investor = inv[0] || null; out.investorPrev = inv[1] || null; });
+  out.tradeDate = (out.investor && out.investor.d) || today;
+  out.isToday = out.tradeDate === today;
+  await step("체결강도", async () => { out.ccnl = await ccnl(event, code); });
+  await step("VI", async () => { out.vi = await viStatus(event, code, out.tradeDate); });
+  await step("코스닥", async () => { out.kosdaq = await index(event, "1001"); });
+  await step("업종", async () => { const s = await sectorIndex(event, out.price && out.price.sector, out.price && out.price.market); out.sector = s.match ? s.match : { name: out.price && out.price.sector, changeRate: null, notFound: true, count: s.count }; });
+  if (out.isToday) await step("분봉", async () => { const b = await minutes(event, code, today); out.swing = swing(b); out.bars = b.length; });
+  return out;
+}
+
 const res = (body, status = 200, cacheSec = 0) => ({
   statusCode: status,
   headers: {
@@ -214,7 +309,8 @@ exports.handler = async function (event) {
       if (!codes.length) return res({ ok: false, error: "codes=005930,000660 형식으로 넣어 주세요" }, 400);
       return res({ ok: true, at: new Date().toISOString(), data: await multi(event, codes) }, 200, 30);
     }
-    return res({ ok: false, error: "type은 price | daily | investor | index | indexdaily | multi" }, 400);
+    if (type === "flow") return res({ ok: true, code, data: await flow(event, code) }, 200, 45);
+    return res({ ok: false, error: "type은 price | daily | investor | index | indexdaily | multi | flow" }, 400);
   } catch (e) {
     return res({ ok: false, error: String(e.message || e) }, 502);
   }

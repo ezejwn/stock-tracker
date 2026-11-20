@@ -147,6 +147,148 @@
     }).join("") : `<p class="muted">${rows.length ? "조건에 맞는 날이 없습니다." : "일봉 데이터를 불러오지 못했습니다."}</p>`;
   }
 
+  /* =================== 1-1) 수급 체크 (장중 자동 갱신) ===================
+     체결강도 · VI · 코스닥/업종 · 분봉 급변 구간 · 투자자 → 번호 매긴 설명 + 기사 문장 */
+  let F = null, fTimer = null, fLoading = false;
+  const kstParts = () => { const d = new Date(Date.now() + 9 * 3600e3); return { dow: d.getUTCDay(), hm: d.getUTCHours() * 100 + d.getUTCMinutes() }; };
+  const marketOpen = () => { const k = kstParts(); return k.dow >= 1 && k.dow <= 5 && k.hm >= 900 && k.hm < 1540; };
+  const hhmm = (t) => (t ? `${t.slice(0, 2)}:${t.slice(2, 4)}` : "");
+  const hanTime = (t) => (t ? `${+t.slice(0, 2)}시${+t.slice(2, 4) ? ` ${+t.slice(2, 4)}분` : ""}` : "");
+  const secOf = (t) => (t ? +t.slice(0, 2) * 3600 + +t.slice(2, 4) * 60 + +(t.slice(4, 6) || 0) : 0);
+  const sgn = (n, d = 2) => (n == null || isNaN(n) ? "–" : `${n > 0 ? "+" : ""}${fmt(n, d)}%`);
+  const absf = (n, d = 2) => fmt(Math.abs(n), d);
+  const strBand = (s) => (s < 10 ? `${Math.floor(s)}%대` : s < 1000 ? `${Math.floor(s / 10) * 10}%대` : `${fmt(s)}%`);
+  const manju = (n) => { const a = Math.abs(n); return a >= 10000 ? `${fmt(a / 10000, a >= 100000 ? 0 : 1).replace(/\.0$/, "")}만주` : `${fmt(a)}주`; };
+
+  async function loadFlow(force) {
+    if (fLoading) return; fLoading = true;
+    const box = $("#whyFlow");
+    if (!F && box) box.innerHTML = `<div class="flow"><p class="muted">수급 체크 불러오는 중… (체결강도·VI·업종·분봉·투자자)</p></div>`;
+    try { F = (await getJSON(API + "stock?type=flow" + (force ? "&t=" + Date.now() : ""))).data; F.err = null; }
+    catch (e) { F = Object.assign(F || {}, { err: e.message }); }
+    fLoading = false;
+    renderFlow();
+  }
+  function startFlowTimer() {
+    stopFlowTimer();
+    fTimer = setInterval(() => { if (!$("#whyBody").hidden && marketOpen() && !document.hidden) loadFlow(); }, 60e3);
+  }
+  function stopFlowTimer() { if (fTimer) clearInterval(fTimer); fTimer = null; }
+
+  function buildFlow(f) {
+    const P = f.price || {}, chg = P.changeRate, name = D.META.name;
+    const kq = f.kosdaq && f.kosdaq.changeRate, sec = f.sector && f.sector.changeRate, secName = f.sector && f.sector.name;
+    const vol = P.volume, items = [], write = [];
+    const down = chg < 0, dir = down ? "빠지" : "오르";
+    const sw = f.swing ? (down ? f.swing.down : f.swing.up) : null;
+    const swOk = sw && Math.abs(sw.chg) >= 2;
+
+    // 1. 시장·업종
+    const mkts = [kq != null ? ["코스닥", kq] : null, sec != null ? [`${secName} 업종`, sec] : null].filter(Boolean);
+    const same = mkts.filter(([, v]) => Math.sign(v) === Math.sign(chg) && Math.abs(v) >= 1);
+    if (chg != null && mkts.length) {
+      const stats = mkts.map(([n, v]) => `${n}이 ${sgn(v)}`).join(", ");
+      if (same.length) {
+        const ref = same[same.length - 1][1];
+        const rel = Math.abs(chg) > Math.abs(ref) * 1.3 ? `더 크게 ${down ? "빠진" : "오른"} 거예요` : Math.abs(chg) < Math.abs(ref) * 0.7 ? `오히려 덜 ${down ? "빠진" : "오른"} 편이에요` : `비슷하게 움직인 거예요`;
+        items.push({ t: `시장 전체가 ${dir}는 날이에요`, b: `${stats} ${down ? "하락" : "상승"} 중이에요. ${name}(${sgn(chg)})만의 ${down ? "악재" : "호재"}라기보다 시장과 업종 전체가 ${down ? "밀리는" : "오르는"} 와중에 ${rel}.${swOk ? ` ${hhmm(sw.from)} ${down ? "급락" : "급등"}도 이 흐름 안에서 봐야 해요.` : ""}` });
+        const big = (v) => (Math.abs(v) >= 2 ? (down ? "급락" : "급등") : (down ? "약세" : "강세"));
+        const mk = same.map(([n, v]) => `${n}(${sgn(v)})`);
+        const verb = same.length > 1 ? `동반 ${big(Math.min(...same.map(([, v]) => Math.abs(v))) * Math.sign(chg))}` : big(same[0][1]);
+        write.push(`${mk.join("과 ")}이 ${verb.includes("약세") || verb.includes("강세") ? verb + "를 보인" : verb + "한"} 가운데,`);
+      } else if (Math.abs(chg) >= 3) {
+        items.push({ t: `시장은 조용한데 ${name}만 크게 움직였어요`, b: `${stats}로 시장 흐름과 다르게 ${name}만 ${sgn(chg)}예요. 시장 탓으로 쓰기는 어렵고, 종목 자체 이슈(공시·뉴스·수급)를 먼저 확인해야 해요. 아래 '같은 시기 뉴스·기록'을 함께 보세요.` });
+        write.push(`시장 전반이 ${kq != null && Math.abs(kq) < 1 ? "보합권에 머문" : "엇갈린 흐름을 보인"} 가운데,`);
+      } else {
+        items.push({ t: `시장과 비슷한 흐름이에요`, b: `${stats}이고 ${name}는 ${sgn(chg)}예요. 눈에 띄는 쏠림은 없어요.` });
+      }
+    }
+    // 분봉 급변 구간 문장
+    if (swOk) write.push(`${name}는 ${hanTime(sw.from)}경 ${down ? "매도" : "매수"} 물량이 몰리며 ${down ? "낙폭" : "상승폭"}을 키웠다.`);
+    else if (chg != null && Math.abs(chg) >= 1) write.push(`${name}는 전 거래일 대비 ${absf(chg)}% ${down ? "하락" : "상승"}한 ${fmt(P.price)}원에 거래되고 있다.`);
+
+    // 2. VI
+    const vis = (f.vi || []);
+    if (vis.length) {
+      const v = vis[vis.length - 1];
+      const kind = v.kind ? `${v.kind} ` : "";
+      const dev = v.dev != null ? Math.abs(v.dev) : null;
+      const off = v.off && v.off !== "000000" ? v.off : null;
+      const dirv = (v.dev != null ? v.dev < 0 : down) ? "빠지" : "오르";
+      const near = swOk && secOf(v.on) >= secOf(sw.from) - 60 && secOf(v.on) <= secOf(sw.to) + 600;
+      items.push({ t: `VI(변동성완화장치)가 발동됐어요${vis.length > 1 ? ` (오늘 ${vis.length}번)` : ""}`,
+        b: `${hhmm(v.on)}에 ${kind}VI가 걸렸${off ? `다가 ${hhmm(off)}에 해제됐어요` : "고, 아직 해제 전이에요"}. ${v.base ? `기준가 ${fmt(v.base)}원에서 ` : ""}${dev != null ? `${dev >= 1 ? Math.floor(dev) + "% 넘게" : absf(dev, 1) + "%"} ` : ""}${dirv}면서${v.price ? `(발동가 ${fmt(v.price)}원)` : ""} 걸린 거고, 2분간 단일가 매매를 ${off ? "했어요" : "하는 중이에요"}.${near ? ` ${hhmm(sw.from)}~${hhmm(sw.to)}의 ${down ? "급락" : "급등"}과 거래량 급증${sw.share != null ? `(5분간 하루 거래량의 ${fmt(sw.share, 0)}%)` : ""}이 이 구간이에요.` : ""}` });
+      const lvl = dev != null ? `${v.dev < 0 || down ? "하락률" : "상승률"}이 ${Math.floor(dev)}%를 넘어서며 ` : "";
+      write.push(`${lvl}변동성완화장치(VI)가 발동됐${off ? `다가 ${hanTime(off)} 해제됐다.` : "다."}`);
+    } else if (P.vi === "Y") {
+      items.push({ t: "지금 VI가 걸려 있어요", b: "현재가 조회에 VI 적용 중으로 나와요. 2분간 단일가 매매 후 풀려요. 발동 시각은 VI 현황 조회가 실패해 못 가져왔어요." });
+      write.push("변동성완화장치(VI)가 발동됐다.");
+    }
+
+    // 3. 체결강도
+    const s = f.ccnl && f.ccnl.strength;
+    if (s != null) {
+      const lvl = s < 30 ? "매우 낮은" : s < 80 ? "낮은" : s <= 120 ? "균형에 가까운" : s < 200 ? "높은" : "매우 높은";
+      const side = s < 80 ? "매도 우위" : s > 120 ? "매수 우위" : "균형";
+      items.push({ t: `체결강도 ${fmt(s, 2)}%면 ${side === "균형" ? "어느 쪽도 우위가 뚜렷하지 않아요" : side + "가 맞아요"}`, b: `체결강도는 매수 체결량을 매도 체결량으로 나눈 값이에요. 100%보다 낮으면 파는 쪽이, 높으면 사는 쪽이 더 적극적이라는 뜻인데, ${fmt(s, 2)}%는 ${lvl} 수준이에요. ${side === "매도 우위" ? '"매도세가 강했다"는 이 숫자로 뒷받침할 수 있어요.' : side === "매수 우위" ? '"매수세가 강했다"는 이 숫자로 뒷받침할 수 있어요.' : '"매도세/매수세가 강했다"고 쓰기엔 근거가 약해요.'}` });
+      if (side !== "균형") write.push(`체결강도는 ${strBand(s)}로 ${side}가 뚜렷하다.`);
+    }
+
+    // 4. 투자자 수급
+    const iv = f.investor;
+    if (iv && f.isToday) {
+      const pending = !iv.indiv && !iv.inst;
+      const fr = iv.foreign || 0;
+      const share = vol ? Math.abs(fr) / vol * 100 : null;
+      if (pending) {
+        const small = share != null && share < 5;
+        const bad = (down && fr < 0) || (!down && fr > 0);
+        items.push({ warn: bad && small, t: bad && small ? `"외국인 ${down ? "매도로 하락" : "매수로 상승"}"은 쓰면 안 돼요` : "누가 사고팔았는지는 아직 말할 수 없어요",
+          b: `오늘 외국인은 ${fr > 0 ? "+" : ""}${fmt(fr)}주예요.${vol ? ` 전체 거래량 ${fmt(vol)}주에 비하면 ${share < 5 ? "아주 작아요" : share < 15 ? "일부예요" : "적지 않아요"}(${fmt(share, 1)}%).` : ""} 개인과 기관이 0으로 나오는 건 매매를 안 해서가 아니에요. 장중에는 집계가 안 돼서 그래요. 확정치는 장 마감 후에 나와요. 지금 단계에서는 누가 팔았는지 말할 수 없어요.` });
+      } else {
+        const who = [["개인", iv.indiv], ["외국인", iv.foreign], ["기관", iv.inst]].filter(([, n]) => n);
+        const sellers = who.filter(([, n]) => n < 0).sort((a, b) => a[1] - b[1]), buyers = who.filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+        const pctv = (n) => (vol ? `, 거래량의 ${fmt(Math.abs(n) / vol * 100, 0)}%` : "");
+        const line = who.map(([k, n]) => `${k} ${n > 0 ? "+" : ""}${fmt(n)}주`).join(" · ");
+        const main = down ? sellers[0] : buyers[0];
+        const mainShare = main && vol ? Math.abs(main[1]) / vol * 100 : 0;
+        items.push({ t: main && mainShare >= 10 ? `${main[0]} 순${down ? "매도" : "매수"}가 컸어요` : "수급 주체는 뚜렷하지 않아요",
+          b: `${line}. ${main ? `${down ? "가장 많이 판 쪽은" : "가장 많이 산 쪽은"} ${main[0]}(${manju(main[1])}${pctv(main[1])})이에요. ` : ""}${main && mainShare >= 10 ? `"${main[0]} ${down ? "매도세" : "매수세"}"를 근거로 쓸 수 있어요.` : `거래량 대비 규모가 작아 특정 주체 때문이라고 쓰긴 어려워요.`} ${marketOpen() || kstParts().hm < 1800 ? "장 마감 직후 값은 잠정치라 저녁에 바뀔 수 있어요." : ""}` });
+        if (main && mainShare >= 10) write.push(`수급별로는 ${main[0]}이 ${manju(main[1])}를 순${down ? "매도" : "매수"}했다.`);
+      }
+    } else if (iv && !f.isToday) {
+      items.push({ t: "오늘은 장이 열리지 않았어요", b: `마지막 거래일(${toDash(iv.d)}) 수급: 개인 ${fmt(iv.indiv)}주 · 외국인 ${fmt(iv.foreign)}주 · 기관 ${fmt(iv.inst)}주.` });
+    }
+    return { items, write: write.join(" ") };
+  }
+
+  function renderFlow() {
+    const box = $("#whyFlow"); if (!box) return;
+    if (!F || (!F.price && F.err)) { box.innerHTML = `<div class="flow"><p class="small" style="color:#c0392b">수급 체크를 못 불러왔어요 — ${esc(F && F.err)}</p></div>`; return; }
+    const { items, write } = buildFlow(F);
+    const live = marketOpen();
+    const sw = F.swing;
+    const facts = [
+      F.ccnl && F.ccnl.strength != null ? `체결강도 ${fmt(F.ccnl.strength, 2)}%` : null,
+      F.sector ? `${esc(F.sector.name || "업종")} ${F.sector.notFound ? "지수 못 찾음" : sgn(F.sector.changeRate)}` : null,
+      F.price && F.price.volume ? `거래량 ${fmt(F.price.volume)}주` : null,
+      sw && sw.down ? `최대 5분 하락 ${hhmm(sw.down.from)}~${hhmm(sw.down.to)} ${sgn(sw.down.chg)}` : null,
+      sw && sw.up ? `최대 5분 상승 ${hhmm(sw.up.from)}~${hhmm(sw.up.to)} ${sgn(sw.up.chg)}` : null,
+      sw && sw.peakMinute ? `거래 최다 1분 ${hhmm(sw.peakMinute.t)} (${fmt(sw.peakMinute.share, 1)}%)` : null,
+    ].filter(Boolean).join(" · ");
+    box.innerHTML = `<div class="flow">
+      <div class="fh"><b>🔎 수급 체크 — 지금 주가 왜 이래요?</b>
+        <span class="ctl">${live ? '<span class="live"></span>장중 1분마다 자동 갱신 · ' : "장 마감·휴장 — 자동 갱신 쉼 · "}기준 ${hhmm(F.kst)}<button id="flowRefresh">새로고침</button></span></div>
+      ${items.length ? `<ol>${items.map((x) => `<li${x.warn ? ' class="warn"' : ""}><b class="t">${esc(x.t)}</b>${esc(x.b)}</li>`).join("")}</ol>` : '<p class="muted">설명할 만한 데이터가 아직 없어요.</p>'}
+      ${write ? `<div class="write"><div class="lbl">이렇게 쓰시면 돼요 <button id="flowCopy">복사</button></div><span id="flowText">"${esc(write)}"</span></div>` : ""}
+      <div class="facts">${facts}${F.errors && F.errors.length ? ` · <span style="color:#c0392b">못 불러온 항목: ${esc(F.errors.join(" / "))}</span>` : ""}${F.err ? ` · <span style="color:#c0392b">최근 갱신 실패: ${esc(F.err)}</span>` : ""}</div>
+      <p class="facts" style="margin-top:4px">자동 문장은 숫자를 엮은 초안이에요. 원인을 확정하지 않으니 기사에 쓰기 전에 뉴스·공시를 함께 확인하세요.</p>
+    </div>`;
+    const rb = $("#flowRefresh"); if (rb) rb.onclick = () => loadFlow(true);
+    const cb = $("#flowCopy"); if (cb) cb.onclick = async () => { try { await navigator.clipboard.writeText(write); cb.textContent = "복사됨"; } catch (e) { cb.textContent = "복사 실패"; } setTimeout(() => (cb.textContent = "복사"), 1500); };
+    const h = $("#whyHint"); if (h && F.price) h.innerHTML = `오늘 ${pct(F.price.changeRate)}${F.ccnl && F.ccnl.strength != null ? ` · 체결강도 ${fmt(F.ccnl.strength, 0)}%` : ""}${(F.vi || []).length ? " · VI 발동" : ""} · 눌러서 이유 보기`;
+  }
+
   /* =================== 2) 주변 시장 =================== */
   let A = null, aTab = "peers";
   async function loadAround() {
@@ -225,7 +367,7 @@
   }
 
   /* =================== 연결 =================== */
-  toggle($("#whyBtn"), $("#whyBody"), loadWhy);
+  toggle($("#whyBtn"), $("#whyBody"), () => { loadWhy(); loadFlow(); startFlowTimer(); });
   toggle($("#aroundBtn"), $("#aroundBody"), loadAround);
   $("#moveFilter").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; moveFilter = b.dataset.f; $$("#moveFilter button").forEach((x) => x.classList.toggle("on", x === b)); if (W) renderWhy(); });
   $("#aroundTabs").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; aTab = b.dataset.t; $$("#aroundTabs button").forEach((x) => x.classList.toggle("on", x === b)); if (A) renderAround(); });
