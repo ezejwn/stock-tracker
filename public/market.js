@@ -163,7 +163,7 @@
   async function loadFlow(force) {
     if (fLoading) return; fLoading = true;
     const box = $("#whyFlow");
-    if (!F && box) box.innerHTML = `<div class="flow"><p class="muted">수급 체크 불러오는 중… (체결강도·VI·업종·분봉·투자자)</p></div>`;
+    if (!F && box) box.innerHTML = `<div class="sflow"><p class="muted">수급 체크 불러오는 중… (체결강도·VI·업종·분봉·투자자)</p></div>`;
     try { F = (await getJSON(API + "stock?type=flow" + (force ? "&t=" + Date.now() : ""))).data; F.err = null; }
     catch (e) { F = Object.assign(F || {}, { err: e.message }); }
     fLoading = false;
@@ -266,7 +266,7 @@
 
   function renderFlow() {
     const box = $("#whyFlow"); if (!box) return;
-    if (!F || (!F.price && F.err)) { box.innerHTML = `<div class="flow"><p class="small" style="color:#c0392b">수급 체크를 못 불러왔어요 — ${esc(F && F.err)}</p></div>`; return; }
+    if (!F || (!F.price && F.err)) { box.innerHTML = `<div class="sflow"><p class="small" style="color:#c0392b">수급 체크를 못 불러왔어요 — ${esc(F && F.err)}</p></div>`; return; }
     const { items, write } = buildFlow(F);
     const live = marketOpen();
     const sw = F.swing;
@@ -278,7 +278,7 @@
       sw && sw.up ? `최대 5분 상승 ${hhmm(sw.up.from)}~${hhmm(sw.up.to)} ${sgn(sw.up.chg)}` : null,
       sw && sw.peakMinute ? `거래 최다 1분 ${hhmm(sw.peakMinute.t)} (${fmt(sw.peakMinute.share, 1)}%)` : null,
     ].filter(Boolean).join(" · ");
-    box.innerHTML = `<div class="flow">
+    box.innerHTML = `<div class="sflow">
       <div class="fh"><b>🔎 수급 체크 — 지금 주가 왜 이래요?</b>
         <span class="ctl">${live ? '<span class="live"></span>장중 1분마다 자동 갱신 · ' : "장 마감·휴장 — 자동 갱신 쉼 · "}기준 ${hhmm(F.kst)}<button id="flowRefresh">새로고침</button></span></div>
       ${items.length ? `<ol>${items.map((x) => `<li${x.warn ? ' class="warn"' : ""}><b class="t">${esc(x.t)}</b>${esc(x.b)}</li>`).join("")}</ol>` : '<p class="muted">설명할 만한 데이터가 아직 없어요.</p>'}
