@@ -238,13 +238,15 @@
     const iv = f.investor;
     if (iv && f.isToday) {
       const pending = !iv.indiv && !iv.inst;
+      const frNull = iv.foreign == null;
       const fr = iv.foreign || 0;
-      const share = vol ? Math.abs(fr) / vol * 100 : null;
+      const share = vol && !frNull ? Math.abs(fr) / vol * 100 : null;
       if (pending) {
         const small = share != null && share < 5;
-        const bad = (down && fr < 0) || (!down && fr > 0);
-        items.push({ warn: bad && small, t: bad && small ? `"외국인 ${down ? "매도로 하락" : "매수로 상승"}"은 쓰면 안 돼요` : "누가 사고팔았는지는 아직 말할 수 없어요",
-          b: `오늘 외국인은 ${fr > 0 ? "+" : ""}${fmt(fr)}주예요.${vol ? ` 전체 거래량 ${fmt(vol)}주에 비하면 ${share < 5 ? "아주 작아요" : share < 15 ? "일부예요" : "적지 않아요"}(${fmt(share, 1)}%).` : ""} 개인과 기관이 0으로 나오는 건 매매를 안 해서가 아니에요. 장중에는 집계가 안 돼서 그래요. 확정치는 장 마감 후에 나와요. 지금 단계에서는 누가 팔았는지 말할 수 없어요.` });
+        const bad = !frNull && ((down && fr < 0) || (!down && fr > 0));
+        const frLine = frNull ? "외국인·개인·기관 모두 아직 집계 전이에요(빈 값)." : `오늘 외국인은 ${fr > 0 ? "+" : ""}${fmt(fr)}주예요.${vol ? ` 전체 거래량 ${fmt(vol)}주에 비하면 ${share < 5 ? "아주 작아요" : share < 15 ? "일부예요" : "적지 않아요"}(${fmt(share, 1)}%).` : ""} 개인과 기관이 0으로 나오는 건 매매를 안 해서가 아니에요.`;
+        items.push({ warn: (bad && small) || frNull, t: bad && small ? `"외국인 ${down ? "매도로 하락" : "매수로 상승"}"은 쓰면 안 돼요` : `"누가 ${down ? "팔아서" : "사서"}"는 아직 쓰면 안 돼요`,
+          b: `${frLine} 장중에는 집계가 안 돼서 그래요. 확정치는 장 마감 후에 나와요. 지금 단계에서는 누가 ${down ? "팔았는지" : "샀는지"} 말할 수 없어요.${f.investorPrev ? ` (참고: 전 거래일 ${toDash(f.investorPrev.d)} 개인 ${fmt(f.investorPrev.indiv)} · 외국인 ${fmt(f.investorPrev.foreign)} · 기관 ${fmt(f.investorPrev.inst)}주)` : ""}` });
       } else {
         const who = [["개인", iv.indiv], ["외국인", iv.foreign], ["기관", iv.inst]].filter(([, n]) => n);
         const sellers = who.filter(([, n]) => n < 0).sort((a, b) => a[1] - b[1]), buyers = who.filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);

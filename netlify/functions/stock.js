@@ -202,17 +202,23 @@ async function viStatus(event, code, date) {
     price: num(r.vi_prc), base: num(r.vi_stnd_prc), dev: num(r.vi_dprt), count: num(r.vi_count),
   })).sort((a, b) => String(a.on).localeCompare(String(b.on)));
 }
-// 시장(코스닥/코스피) 업종지수 전체 → 종목 업종명과 같은 것 찾기
+// 코스닥 업종지수 코드 (KRX) — 이름으로 바로 조회
+const KQ_SECTORS = { "건설": "1010", "유통": "1011", "운송창고": "1013", "금융": "1014", "오락문화": "1015", "음식료담배": "1019", "섬유의류": "1020",
+  "종이목재": "1021", "출판매체복제": "1022", "화학": "1023", "제약": "1024", "비금속": "1025", "금속": "1026", "기계장비": "1027",
+  "전기전자": "1028", "의료정밀기기": "1029", "운송장비부품": "1030", "기타제조": "1031" };
 async function sectorIndex(event, sectorName, market) {
+  const want = normName(sectorName);
   const kosdaq = !/코스피|KOSPI|유가/i.test(market || "");
+  if (kosdaq && KQ_SECTORS[want]) {
+    const x = await index(event, KQ_SECTORS[want]);
+    return { match: { code: x.code, name: sectorName, value: x.value, changeRate: x.changeRate }, count: 1 };
+  }
   const j = await kis(event, "/uapi/domestic-stock/v1/quotations/inquire-index-category-price", "FHPUP02140000", {
     FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: kosdaq ? "1001" : "0001", FID_COND_SCR_DIV_CODE: "20214",
     FID_MRKT_CLS_CODE: kosdaq ? "Q" : "K", FID_BLNG_CLS_CODE: "0",
   });
   const list = (j.output2 || []).map((r) => ({ code: r.bstp_cls_code, name: r.hts_kor_isnm, value: num(r.bstp_nmix_prpr), changeRate: num(r.bstp_nmix_prdy_ctrt) }));
-  const want = normName(sectorName);
-  if (!want) return { match: null, count: list.length };
-  const match = list.find((x) => normName(x.name) === want) || list.find((x) => normName(x.name).includes(want) || (normName(x.name) && want.includes(normName(x.name))));
+  const match = want ? list.find((x) => normName(x.name) === want) : null; // 이름이 정확히 같은 것만 (WISE·KRX 테마지수 오매칭 방지)
   return { match: match || null, count: list.length, list };
 }
 // 당일 1분봉 (30개씩 거꾸로)
