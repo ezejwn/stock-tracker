@@ -177,40 +177,59 @@
 
   function buildFlow(f) {
     const P = f.price || {}, chg = P.changeRate, name = D.META.name;
-    const kq = f.kosdaq && f.kosdaq.changeRate, sec = f.sector && f.sector.changeRate, secName = f.sector && f.sector.name;
-    const vol = P.volume, items = [], write = [];
+    const kq = f.kosdaq && f.kosdaq.changeRate;
+    const secOk = f.sector && !f.sector.notFound && f.sector.changeRate != null;
+    const sec = secOk ? f.sector.changeRate : null, secName = f.sector && f.sector.name;
+    const vol = P.volume, items = [];
+    const W = { pre: "", ev: [], tail: [] }; // 기사 문장: 시장 → 장중 사건(시간순) → 체결강도·수급
     const down = chg < 0, dir = down ? "빠지" : "오르";
     const sw = f.swing ? (down ? f.swing.down : f.swing.up) : null;
     const swOk = sw && Math.abs(sw.chg) >= 2;
+    const big = (v) => (Math.abs(v) >= 2 ? (v < 0 ? "급락" : "급등") : (v < 0 ? "약세" : "강세"));
+    const verbed = (w) => (/약세|강세/.test(w) ? `${w}를 보인` : `${w}한`);
 
     // 1. 시장·업종
     const mkts = [kq != null ? ["코스닥", kq] : null, sec != null ? [`${secName} 업종`, sec] : null].filter(Boolean);
-    const same = mkts.filter(([, v]) => Math.sign(v) === Math.sign(chg) && Math.abs(v) >= 1);
     if (chg != null && mkts.length) {
       const stats = mkts.map(([n, v]) => `${n}이 ${sgn(v)}`).join(", ");
+      const same = mkts.filter(([, v]) => Math.sign(v) === Math.sign(chg) && Math.abs(v) >= 1);
+      const opp = mkts.filter(([, v]) => Math.sign(v) === -Math.sign(chg) && Math.abs(v) >= 1);
       if (same.length) {
         const ref = same[same.length - 1][1];
         const rel = Math.abs(chg) > Math.abs(ref) * 1.3 ? `더 크게 ${down ? "빠진" : "오른"} 거예요` : Math.abs(chg) < Math.abs(ref) * 0.7 ? `오히려 덜 ${down ? "빠진" : "오른"} 편이에요` : `비슷하게 움직인 거예요`;
         items.push({ t: `시장 전체가 ${dir}는 날이에요`, b: `${stats} ${down ? "하락" : "상승"} 중이에요. ${name}(${sgn(chg)})만의 ${down ? "악재" : "호재"}라기보다 시장과 업종 전체가 ${down ? "밀리는" : "오르는"} 와중에 ${rel}.${swOk ? ` ${hhmm(sw.from)} ${down ? "급락" : "급등"}도 이 흐름 안에서 봐야 해요.` : ""}` });
-        const big = (v) => (Math.abs(v) >= 2 ? (down ? "급락" : "급등") : (down ? "약세" : "강세"));
         const mk = same.map(([n, v]) => `${n}(${sgn(v)})`);
-        const verb = same.length > 1 ? `동반 ${big(Math.min(...same.map(([, v]) => Math.abs(v))) * Math.sign(chg))}` : big(same[0][1]);
-        write.push(`${mk.join("과 ")}이 ${verb.includes("약세") || verb.includes("강세") ? verb + "를 보인" : verb + "한"} 가운데,`);
+        const w = same.length > 1 ? `동반 ${big(Math.sign(chg) * Math.min(...same.map(([, v]) => Math.abs(v))))}` : big(same[0][1]);
+        W.pre = `${mk.join("과 ")}이 ${verbed(w)} 가운데,`;
+      } else if (opp.length && Math.abs(chg) >= 2) {
+        items.push({ t: `시장은 ${down ? "오르는데" : "빠지는데"} ${name}만 ${down ? "빠졌어요" : "올랐어요"}`, b: `${stats}인데 ${name}는 ${sgn(chg)}예요. 시장과 반대로 움직였으니 시장 탓은 아니에요. 종목 자체 이슈(공시·뉴스·테마·수급)를 먼저 확인해야 해요. 아래 '같은 시기 뉴스·기록'을 함께 보세요.` });
+        const o = opp[0];
+        W.pre = `${o[0]}(${sgn(o[1])})이 ${verbed(big(o[1]))} 가운데에도`;
       } else if (Math.abs(chg) >= 3) {
         items.push({ t: `시장은 조용한데 ${name}만 크게 움직였어요`, b: `${stats}로 시장 흐름과 다르게 ${name}만 ${sgn(chg)}예요. 시장 탓으로 쓰기는 어렵고, 종목 자체 이슈(공시·뉴스·수급)를 먼저 확인해야 해요. 아래 '같은 시기 뉴스·기록'을 함께 보세요.` });
-        write.push(`시장 전반이 ${kq != null && Math.abs(kq) < 1 ? "보합권에 머문" : "엇갈린 흐름을 보인"} 가운데,`);
+        W.pre = `시장이 보합권에 머문 가운데,`;
       } else {
         items.push({ t: `시장과 비슷한 흐름이에요`, b: `${stats}이고 ${name}는 ${sgn(chg)}예요. 눈에 띄는 쏠림은 없어요.` });
       }
     }
-    // 분봉 급변 구간 문장
-    if (swOk) write.push(`${name}는 ${hanTime(sw.from)}경 ${down ? "매도" : "매수"} 물량이 몰리며 ${down ? "낙폭" : "상승폭"}을 키웠다.`);
-    else if (chg != null && Math.abs(chg) >= 1) write.push(`${name}는 전 거래일 대비 ${absf(chg)}% ${down ? "하락" : "상승"}한 ${fmt(P.price)}원에 거래되고 있다.`);
+    if (swOk) W.ev.push([sw.from, `${hanTime(sw.from)}경 ${down ? "매도" : "매수"} 물량이 몰리며 ${down ? "낙폭" : "상승폭"}을 키웠다.`]);
+
+    // 장중 고점·저점 반납
+    const prev = P.price != null && P.change != null ? P.price - P.change : null;
+    if (prev && P.high && P.low && chg != null) {
+      const hiPct = (P.high / prev - 1) * 100, loPct = (P.low / prev - 1) * 100;
+      if (!down && hiPct - chg >= 3) {
+        items.push({ t: `장중 고점에서 많이 내려왔어요`, b: `한때 ${sgn(hiPct)}(${fmt(P.high)}원)까지 올랐다가 지금은 ${sgn(chg)}예요. 오른 폭의 상당 부분을 되돌렸으니 "급등"만 쓰면 지금 상황과 안 맞아요.` });
+        W.tail.push(`장중 한때 ${absf(hiPct, 1)}%까지 올랐으나 이후 상승폭을 ${chg / hiPct < 0.5 ? "상당 부분" : "일부"} 반납했다.`);
+      } else if (down && chg - loPct >= 3) {
+        items.push({ t: `장중 저점에서는 꽤 올라왔어요`, b: `한때 ${sgn(loPct)}(${fmt(P.low)}원)까지 밀렸다가 지금은 ${sgn(chg)}예요. 저가 매수가 일부 들어온 흐름이에요.` });
+        W.tail.push(`장중 한때 ${absf(loPct, 1)}%까지 밀렸으나 이후 낙폭을 ${chg / loPct < 0.5 ? "상당 부분" : "일부"} 만회했다.`);
+      }
+    }
 
     // 2. VI
     const vis = (f.vi || []);
     if (vis.length) {
-      // 가장 의미 있는 VI(정적 우선, 괴리율 큰 순)를 중심으로, 나머지는 한 줄로
       const score = (x) => (/정적/.test(x.kind || "") ? 100 : 0) + Math.abs(x.dev || 0);
       const v = vis.slice().sort((x, y) => score(y) - score(x) || String(x.on).localeCompare(String(y.on)))[0];
       const rest = vis.filter((x) => x !== v);
@@ -218,16 +237,17 @@
       const dev = v.dev ? Math.abs(v.dev) : null;
       const base = v.base || null;
       const off = v.off && v.off !== "000000" ? v.off : null;
-      const dirv = (v.dev ? v.dev < 0 : down) ? "빠지" : "오르";
+      const vUp = v.dev ? v.dev > 0 : !down;
       const near = swOk && secOf(v.on) >= secOf(sw.from) - 60 && secOf(v.on) <= secOf(sw.to) + 600;
-      const restTxt = rest.length ? ` 이후 ${rest.map((x) => `${hhmm(x.on)}(${x.kind || ""}${x.price ? ` ${fmt(x.price)}원` : ""})`).join(", ")}에도 VI가 걸렸다 풀렸어요${rest.every((x) => /동적/.test(x.kind || "")) ? " — 동적 VI는 짧은 시간 급하게 움직일 때 걸리는 거라 그 시각 전후 급변을 뜻해요" : ""}.` : "";
+      const restTxt = rest.length ? ` ${secOf(rest[0].on) < secOf(v.on) ? "이 밖에" : "이후"} ${rest.map((x) => `${hhmm(x.on)}(${x.kind || ""}${x.price ? ` ${fmt(x.price)}원` : ""})`).join(", ")}에도 VI가 걸렸다 풀렸어요${rest.every((x) => /동적/.test(x.kind || "")) ? " — 동적 VI는 짧은 시간 급하게 움직일 때 걸리는 거라 그 시각 전후 급변을 뜻해요" : ""}.` : "";
       items.push({ t: `VI(변동성완화장치)가 발동됐어요${vis.length > 1 ? ` (오늘 ${vis.length}번)` : ""}`,
-        b: `${hhmm(v.on)}에 ${kind}VI가 걸렸${off ? `다가 ${hhmm(off)}에 해제됐어요` : "고, 아직 해제 전이에요"}. ${base && dev ? `기준가 ${fmt(base)}원에서 ${dev >= 1 ? Math.floor(dev) + "% 넘게" : absf(dev, 1) + "%"} ${dirv}면서${v.price ? `(발동가 ${fmt(v.price)}원)` : ""} 걸린 거고, ` : v.price ? `발동가는 ${fmt(v.price)}원이고, ` : ""}2분간 단일가 매매를 ${off ? "했어요" : "하는 중이에요"}.${near ? ` ${hhmm(sw.from)}~${hhmm(sw.to)}의 ${down ? "급락" : "급등"}과 거래량 급증${sw.share != null ? `(5분간 하루 거래량의 ${fmt(sw.share, 0)}%)` : ""}이 이 구간이에요.` : ""}${restTxt}` });
-      const lvl = dev && base ? `${v.dev < 0 ? "하락률" : "상승률"}이 ${Math.floor(dev)}%를 넘어서며 ` : "";
-      write.push(`${lvl}변동성완화장치(VI)가 발동됐${off ? `다가 ${hanTime(off)} 해제됐다.` : "다."}${rest.length ? ` 이후 ${/동적/.test(rest.map((x) => x.kind).join("")) && rest.every((x) => /동적/.test(x.kind || "")) ? "동적 VI가" : "VI가"} ${rest.length === 1 ? "한" : rest.length === 2 ? "두" : rest.length === 3 ? "세" : rest.length} 차례 더 발동됐다.` : ""}`);
+        b: `${hhmm(v.on)}에 ${kind}VI가 걸렸${off ? `다가 ${hhmm(off)}에 해제됐어요` : "고, 아직 해제 전이에요"}. ${base && dev ? `기준가 ${fmt(base)}원에서 ${dev >= 1 ? Math.floor(dev) + "% 넘게" : absf(dev, 1) + "%"} ${vUp ? "오르" : "빠지"}면서${v.price ? `(발동가 ${fmt(v.price)}원)` : ""} 걸린 거고, ` : v.price ? `발동가는 ${fmt(v.price)}원이고, ` : ""}2분간 단일가 매매를 ${off ? "했어요" : "하는 중이에요"}.${near ? ` ${hhmm(sw.from)}~${hhmm(sw.to)}의 ${down ? "급락" : "급등"}과 거래량 급증${sw.share != null ? `(5분간 하루 거래량의 ${fmt(sw.share, 0)}%)` : ""}이 이 구간이에요.` : ""}${restTxt}` });
+      const lvl = dev && base ? `${vUp ? "상승률" : "하락률"}이 ${Math.floor(dev)}%를 넘어서며 ` : "";
+      const cnt = ["", "한", "두", "세", "네", "다섯"][rest.length] || rest.length;
+      W.ev.push([v.on, `${lvl}변동성완화장치(VI)가 발동됐${off ? `다가 ${hanTime(off)} 해제됐다.` : "다."}${rest.length ? ` ${secOf(rest[0].on) < secOf(v.on) ? "이를 포함해 이날 VI는 모두 " + vis.length + "차례 발동됐다." : `이후 ${rest.every((x) => /동적/.test(x.kind || "")) ? "동적 VI가" : "VI가"} ${cnt} 차례 더 발동됐다.`}` : ""}`]);
     } else if (P.vi === "Y") {
       items.push({ t: "지금 VI가 걸려 있어요", b: "현재가 조회에 VI 적용 중으로 나와요. 2분간 단일가 매매 후 풀려요. 발동 시각은 VI 현황 조회가 실패해 못 가져왔어요." });
-      write.push("변동성완화장치(VI)가 발동됐다.");
+      W.tail.push("변동성완화장치(VI)가 발동됐다.");
     }
 
     // 3. 체결강도
@@ -235,8 +255,10 @@
     if (s != null) {
       const lvl = s < 30 ? "매우 낮은" : s < 80 ? "낮은" : s <= 120 ? "균형에 가까운" : s < 200 ? "높은" : "매우 높은";
       const side = s < 80 ? "매도 우위" : s > 120 ? "매수 우위" : "균형";
-      items.push({ t: `체결강도 ${fmt(s, 2)}%면 ${side === "균형" ? "어느 쪽도 우위가 뚜렷하지 않아요" : side + "가 맞아요"}`, b: `체결강도는 매수 체결량을 매도 체결량으로 나눈 값이에요. 100%보다 낮으면 파는 쪽이, 높으면 사는 쪽이 더 적극적이라는 뜻인데, ${fmt(s, 2)}%는 ${lvl} 수준이에요. ${side === "매도 우위" ? '"매도세가 강했다"는 이 숫자로 뒷받침할 수 있어요.' : side === "매수 우위" ? '"매수세가 강했다"는 이 숫자로 뒷받침할 수 있어요.' : '"매도세/매수세가 강했다"고 쓰기엔 근거가 약해요.'}` });
-      if (side !== "균형") write.push(`체결강도는 ${strBand(s)}로 ${side}가 뚜렷하다.`);
+      const against = (side === "매도 우위" && !down) || (side === "매수 우위" && down);
+      items.push({ t: against ? `주가는 ${down ? "빠졌지만" : "올랐지만"} 체결강도는 ${side}예요` : `체결강도 ${fmt(s, 2)}%면 ${side === "균형" ? "어느 쪽도 우위가 뚜렷하지 않아요" : side + "가 맞아요"}`,
+        b: `체결강도는 매수 체결량을 매도 체결량으로 나눈 값이에요. 100%보다 낮으면 파는 쪽이, 높으면 사는 쪽이 더 적극적이라는 뜻인데, ${fmt(s, 2)}%는 ${lvl} 수준이에요. ${against ? `${down ? "빠진" : "오른"} 건 장 초반 일이고, 지금은 ${side === "매도 우위" ? "파는 쪽" : "사는 쪽"}이 더 적극적이라는 뜻이에요. "${down ? "매도세" : "매수세"}가 강했다"고 쓰면 이 숫자와 어긋나요.` : side === "매도 우위" ? '"매도세가 강했다"는 이 숫자로 뒷받침할 수 있어요.' : side === "매수 우위" ? '"매수세가 강했다"는 이 숫자로 뒷받침할 수 있어요.' : '"매도세/매수세가 강했다"고 쓰기엔 근거가 약해요.'}` });
+      if (side !== "균형") W.tail.push(against ? `다만 체결강도는 ${strBand(s)}로 ${side}를 보이고 있다.` : `체결강도는 ${strBand(s)}로 ${side}가 뚜렷하다.`);
     }
 
     // 4. 투자자 수급
@@ -261,12 +283,20 @@
         const mainShare = main && vol ? Math.abs(main[1]) / vol * 100 : 0;
         items.push({ t: main && mainShare >= 10 ? `${main[0]} 순${down ? "매도" : "매수"}가 컸어요` : "수급 주체는 뚜렷하지 않아요",
           b: `${line}. ${main ? `${down ? "가장 많이 판 쪽은" : "가장 많이 산 쪽은"} ${main[0]}(${manju(main[1])}${pctv(main[1])})이에요. ` : ""}${main && mainShare >= 10 ? `"${main[0]} ${down ? "매도세" : "매수세"}"를 근거로 쓸 수 있어요.` : `거래량 대비 규모가 작아 특정 주체 때문이라고 쓰긴 어려워요.`} ${marketOpen() || kstParts().hm < 1800 ? "장 마감 직후 값은 잠정치라 저녁에 바뀔 수 있어요." : ""}` });
-        if (main && mainShare >= 10) write.push(`수급별로는 ${main[0]}이 ${manju(main[1])}를 순${down ? "매도" : "매수"}했다.`);
+        if (main && mainShare >= 10) W.tail.push(`수급별로는 ${main[0]}이 ${manju(main[1])}를 순${down ? "매도" : "매수"}했다.`);
       }
     } else if (iv && !f.isToday) {
       items.push({ t: "오늘은 장이 열리지 않았어요", b: `마지막 거래일(${toDash(iv.d)}) 수급: 개인 ${fmt(iv.indiv)}주 · 외국인 ${fmt(iv.foreign)}주 · 기관 ${fmt(iv.inst)}주.` });
     }
-    return { items, write: write.join(" ") };
+
+    // 기사 문장 조립: 시장 → (이름) → 장중 사건 시간순 → 나머지
+    const ev = W.ev.sort((a, b) => secOf(a[0]) - secOf(b[0])).map((x) => x[1]);
+    let first = ev.shift();
+    if (!first && chg != null && Math.abs(chg) >= 1) first = `전 거래일 대비 ${absf(chg)}% ${down ? "하락" : "상승"}한 ${fmt(P.price)}원에 거래되고 있다.`;
+    const parts = [];
+    if (first) parts.push(`${W.pre ? W.pre + " " : ""}${name}는 ${first}`);
+    parts.push(...ev, ...W.tail);
+    return { items, write: parts.join(" ") };
   }
 
   function renderFlow() {
@@ -277,7 +307,7 @@
     const sw = F.swing;
     const facts = [
       F.ccnl && F.ccnl.strength != null ? `체결강도 ${fmt(F.ccnl.strength, 2)}%` : null,
-      F.sector ? `${esc(F.sector.name || "업종")} ${F.sector.notFound ? "지수 못 찾음" : sgn(F.sector.changeRate)}` : null,
+      F.sector ? (F.sector.notFound ? `업종(${esc(F.sector.name || "-")}) 지수 미확인 — 코스닥만 반영` : `${esc(F.sector.name)} ${sgn(F.sector.changeRate)}`) : null,
       F.price && F.price.volume ? `거래량 ${fmt(F.price.volume)}주` : null,
       sw && sw.down ? `최대 5분 하락 ${hhmm(sw.down.from)}~${hhmm(sw.down.to)} ${sgn(sw.down.chg)}` : null,
       sw && sw.up ? `최대 5분 상승 ${hhmm(sw.up.from)}~${hhmm(sw.up.to)} ${sgn(sw.up.chg)}` : null,
