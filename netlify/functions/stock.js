@@ -213,7 +213,7 @@ async function sectorIndex(event, sectorName, market) {
   const want = normName(sectorName);
   if (!want) return { match: null, count: list.length };
   const match = list.find((x) => normName(x.name) === want) || list.find((x) => normName(x.name).includes(want) || (normName(x.name) && want.includes(normName(x.name))));
-  return { match: match || null, count: list.length };
+  return { match: match || null, count: list.length, list };
 }
 // 당일 1분봉 (30개씩 거꾸로)
 async function minutes(event, code, today) {
@@ -309,6 +309,7 @@ exports.handler = async function (event) {
       if (!codes.length) return res({ ok: false, error: "codes=005930,000660 형식으로 넣어 주세요" }, 400);
       return res({ ok: true, at: new Date().toISOString(), data: await multi(event, codes) }, 200, 30);
     }
+    if (type === "sectors") { const p = tidyPrice(await price(event, code)); const r = await sectorIndex(event, p.sector, p.market); return res({ ok: true, sector: p.sector, market: p.market, match: r.match, list: r.list }); }
     if (type === "flow") return res({ ok: true, code, data: await flow(event, code) }, 200, 45);
     return res({ ok: false, error: "type은 price | daily | investor | index | indexdaily | multi | flow" }, 400);
   } catch (e) {
