@@ -210,16 +210,21 @@
     // 2. VI
     const vis = (f.vi || []);
     if (vis.length) {
-      const v = vis[vis.length - 1];
+      // 가장 의미 있는 VI(정적 우선, 괴리율 큰 순)를 중심으로, 나머지는 한 줄로
+      const score = (x) => (/정적/.test(x.kind || "") ? 100 : 0) + Math.abs(x.dev || 0);
+      const v = vis.slice().sort((x, y) => score(y) - score(x) || String(x.on).localeCompare(String(y.on)))[0];
+      const rest = vis.filter((x) => x !== v);
       const kind = v.kind ? `${v.kind} ` : "";
-      const dev = v.dev != null ? Math.abs(v.dev) : null;
+      const dev = v.dev ? Math.abs(v.dev) : null;
+      const base = v.base || null;
       const off = v.off && v.off !== "000000" ? v.off : null;
-      const dirv = (v.dev != null ? v.dev < 0 : down) ? "빠지" : "오르";
+      const dirv = (v.dev ? v.dev < 0 : down) ? "빠지" : "오르";
       const near = swOk && secOf(v.on) >= secOf(sw.from) - 60 && secOf(v.on) <= secOf(sw.to) + 600;
+      const restTxt = rest.length ? ` 이후 ${rest.map((x) => `${hhmm(x.on)}(${x.kind || ""}${x.price ? ` ${fmt(x.price)}원` : ""})`).join(", ")}에도 VI가 걸렸다 풀렸어요${rest.every((x) => /동적/.test(x.kind || "")) ? " — 동적 VI는 짧은 시간 급하게 움직일 때 걸리는 거라 그 시각 전후 급변을 뜻해요" : ""}.` : "";
       items.push({ t: `VI(변동성완화장치)가 발동됐어요${vis.length > 1 ? ` (오늘 ${vis.length}번)` : ""}`,
-        b: `${hhmm(v.on)}에 ${kind}VI가 걸렸${off ? `다가 ${hhmm(off)}에 해제됐어요` : "고, 아직 해제 전이에요"}. ${v.base ? `기준가 ${fmt(v.base)}원에서 ` : ""}${dev != null ? `${dev >= 1 ? Math.floor(dev) + "% 넘게" : absf(dev, 1) + "%"} ` : ""}${dirv}면서${v.price ? `(발동가 ${fmt(v.price)}원)` : ""} 걸린 거고, 2분간 단일가 매매를 ${off ? "했어요" : "하는 중이에요"}.${near ? ` ${hhmm(sw.from)}~${hhmm(sw.to)}의 ${down ? "급락" : "급등"}과 거래량 급증${sw.share != null ? `(5분간 하루 거래량의 ${fmt(sw.share, 0)}%)` : ""}이 이 구간이에요.` : ""}` });
-      const lvl = dev != null ? `${v.dev < 0 || down ? "하락률" : "상승률"}이 ${Math.floor(dev)}%를 넘어서며 ` : "";
-      write.push(`${lvl}변동성완화장치(VI)가 발동됐${off ? `다가 ${hanTime(off)} 해제됐다.` : "다."}`);
+        b: `${hhmm(v.on)}에 ${kind}VI가 걸렸${off ? `다가 ${hhmm(off)}에 해제됐어요` : "고, 아직 해제 전이에요"}. ${base && dev ? `기준가 ${fmt(base)}원에서 ${dev >= 1 ? Math.floor(dev) + "% 넘게" : absf(dev, 1) + "%"} ${dirv}면서${v.price ? `(발동가 ${fmt(v.price)}원)` : ""} 걸린 거고, ` : v.price ? `발동가는 ${fmt(v.price)}원이고, ` : ""}2분간 단일가 매매를 ${off ? "했어요" : "하는 중이에요"}.${near ? ` ${hhmm(sw.from)}~${hhmm(sw.to)}의 ${down ? "급락" : "급등"}과 거래량 급증${sw.share != null ? `(5분간 하루 거래량의 ${fmt(sw.share, 0)}%)` : ""}이 이 구간이에요.` : ""}${restTxt}` });
+      const lvl = dev && base ? `${v.dev < 0 ? "하락률" : "상승률"}이 ${Math.floor(dev)}%를 넘어서며 ` : "";
+      write.push(`${lvl}변동성완화장치(VI)가 발동됐${off ? `다가 ${hanTime(off)} 해제됐다.` : "다."}${rest.length ? ` 이후 ${/동적/.test(rest.map((x) => x.kind).join("")) && rest.every((x) => /동적/.test(x.kind || "")) ? "동적 VI가" : "VI가"} ${rest.length === 1 ? "한" : rest.length === 2 ? "두" : rest.length === 3 ? "세" : rest.length} 차례 더 발동됐다.` : ""}`);
     } else if (P.vi === "Y") {
       items.push({ t: "지금 VI가 걸려 있어요", b: "현재가 조회에 VI 적용 중으로 나와요. 2분간 단일가 매매 후 풀려요. 발동 시각은 VI 현황 조회가 실패해 못 가져왔어요." });
       write.push("변동성완화장치(VI)가 발동됐다.");
